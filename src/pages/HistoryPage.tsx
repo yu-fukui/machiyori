@@ -14,6 +14,7 @@ export default function HistoryPage() {
 
   useEffect(() => {
     let qb = supabase.from('orders').select('*, orderer:profiles!orders_created_by_fkey(name, email)')
+      .not('saved_at', 'is', null)   // 作っただけの発注書は出さない
       .order('created_at', { ascending: false }).limit(300)
     if (store) qb = qb.eq('store_id', store)
     if (sup) qb = qb.eq('supplier_id', sup)
@@ -42,7 +43,7 @@ export default function HistoryPage() {
           <option value="">すべての取引先</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <select aria-label="状態" value={status} onChange={e => setStatus(e.target.value)}>
-          <option value="">すべての状態</option><option value="draft">未送信</option><option value="sent">送信済み</option><option value="cancelled">取消</option>
+          <option value="">すべての状態</option><option value="draft">下書き</option><option value="sent">送信済み</option><option value="cancelled">取消</option>
         </select>
         <input type="month" aria-label="発注月" value={month} onChange={e => setMonth(e.target.value)} />
       </div>

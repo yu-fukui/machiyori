@@ -36,7 +36,7 @@ export function periodText(s: { start_date: string | null; end_date: string | nu
 }
 /** 今日（日本時間）を YYYY-MM-DD で */
 export const todayJst = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
-export const statusLabel = { draft: '未送信', sent: '送信済み', cancelled: '取消' } as const
+export const statusLabel = { draft: '下書き', sent: '送信済み', cancelled: '取消' } as const
 export const viaLabel = { email: 'メール', fax: 'FAX', print: '印刷・FAX機' } as const
 
 export function errorText(e: unknown) {

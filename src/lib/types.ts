@@ -84,6 +84,7 @@ export interface Settings {
 export interface OrderLine {
   id: string
   line_no: number
+  item_id: string | null   // 商品を消したあとは空
   code: string | null
   name: string
   spec: string
@@ -119,6 +120,7 @@ export interface Order {
   sent_via: 'email' | 'fax' | 'print' | null
   sent_to: string | null
   sent_at: string | null
+  saved_at: string | null   // 履歴に残した日時。空は「作っただけ」
   created_at: string
   order_lines?: OrderLine[]
 }

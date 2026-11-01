@@ -2,14 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { go, useApp } from '../lib/app'
 import type { Order } from '../lib/types'
-import { errorText, faxAddress, jpDateTime, statusLabel, viaLabel } from '../lib/format'
+import { errorText, faxAddress, jpDateTime, readLocal, statusLabel, viaLabel, writeLocal } from '../lib/format'
 import { downloadBlob, sheetPdf } from '../lib/pdf'
 import OrderSheet from '../components/OrderSheet'
+import { LAST_KEY, RESTORE_KEY, type OrderForm } from './OrderPage'
 
 export default function SheetsPage({ ids }: { ids: string[] }) {
   const [orders, setOrders] = useState<Order[] | null>(null)
   const [printing, setPrinting] = useState<{ ids: string[]; fax: boolean } | null>(null)
   const afterPrint = useRef<(() => void) | null>(null)
+  const [leaving, setLeaving] = useState(false)   // 「発注画面へ」で、保存するかをたずねているあいだ
+  const [leaveBusy, setLeaveBusy] = useState(false)
+  const [leaveError, setLeaveError] = useState('')
 
   const load = useCallback(async () => {
     if (ids.length === 0) { setOrders([]); return }
@@ -44,13 +48,56 @@ export default function SheetsPage({ ids }: { ids: string[] }) {
   if (!orders) return <p className="muted">読み込み中…</p>
   if (orders.length === 0) return <p className="muted">発注書が見つかりません。<a href="#/history">履歴</a>から開いてください。</p>
 
+  // まだ履歴に残していない発注書（作っただけで、送る操作をしていない）
+  const unsaved = orders.filter(o => !o.saved_at)
+
+  function back() {
+    if (unsaved.length === 0) { go('order'); return }
+    setLeaveError(''); setLeaving(true)
+  }
+
+  // 保存する：下書きとして履歴に残す
+  async function saveAndBack() {
+    setLeaveBusy(true); setLeaveError('')
+    const { error } = await supabase.rpc('save_orders', { p_ids: unsaved.map(o => o.id) })
+    setLeaveBusy(false)
+    if (error) { setLeaveError(errorText(error)); return }
+    go('order')
+  }
+
+  // 保存しない：発注書を消して、数量などを発注画面に戻す
+  async function discardAndBack() {
+    setLeaveBusy(true); setLeaveError('')
+    const ids = unsaved.map(o => o.id)
+    const { error } = await supabase.rpc('discard_orders', { p_ids: ids })
+    setLeaveBusy(false)
+    if (error) { setLeaveError(errorText(error)); return }
+    writeLocal(RESTORE_KEY, JSON.stringify(restoreForm(unsaved)))
+    go('order')
+  }
+
   return (
     <div>
       <div className="toolbar no-print">
-        <button className="btn" onClick={() => go('order')}>← 発注画面へ</button>
+        <button className="btn" onClick={back}>← 発注画面へ</button>
         {orders.length > 1 && <button className="btn" onClick={() => print(orders.map(o => o.id))}>すべて印刷</button>}
-        <span className="muted small">{orders.length}枚。作った発注書は履歴に残ります。</span>
+        <span className="muted small">{orders.length}枚。{unsaved.length > 0 ? '送る（メール・FAX・印刷・PDFを保存）と履歴に残ります。' : ''}</span>
       </div>
+      {leaving && (
+        <div className="confirm no-print">
+          <p>まだ送っていない発注書が <b>{unsaved.length}枚</b> あります。履歴に保存しますか？</p>
+          <ul className="small">
+            <li>「下書きとして保存する」：履歴に「下書き」で残ります。あとで履歴から開いて送れます。</li>
+            <li>「保存しない」：この発注書は消えます。入れた数量は発注画面のかごに戻ります。</li>
+          </ul>
+          <div className="row">
+            <button className="btn primary" disabled={leaveBusy} onClick={saveAndBack}>{leaveBusy ? '処理中…' : '下書きとして保存する'}</button>
+            <button className="btn" disabled={leaveBusy} onClick={discardAndBack}>保存しない（数量をかごに戻す）</button>
+            <button className="btn quiet" disabled={leaveBusy} onClick={() => setLeaving(false)}>やめる</button>
+          </div>
+          {leaveError && <p className="msg">{leaveError}</p>}
+        </div>
+      )}
       {orders.map(o => (
         <SheetBlock key={o.id} order={o} reload={load} printTarget={!printing || printing.ids.includes(o.id)}
           faxPrinting={!!printing?.fax && printing.ids.includes(o.id)}
@@ -58,6 +105,26 @@ export default function SheetsPage({ ids }: { ids: string[] }) {
       ))}
     </div>
   )
+}
+
+// 「保存しない」で発注画面に戻す入力。作ったときの控えがあればそれを、なければ発注書の明細から数量を戻す
+function restoreForm(unsaved: Order[]): OrderForm {
+  let last: OrderForm | null = null
+  try { last = JSON.parse(readLocal(LAST_KEY) || 'null') } catch { /* 控えがなくても明細から戻す */ }
+  const ids = new Set(unsaved.map(o => o.id))
+  if (last?.ids?.some(id => ids.has(id))) {
+    // 一部の発注書を送ったあとなら、送っていない取引先の分だけ戻す
+    const keep = new Set(unsaved.flatMap(o => (o.order_lines ?? []).map(l => l.item_id)))
+    const cart = Object.fromEntries(Object.entries(last.cart).filter(([id]) => keep.has(id)))
+    return { ...last, ids: undefined, cart }
+  }
+  const o = unsaved[0]
+  const cart: Record<string, number> = {}
+  for (const u of unsaved) for (const l of u.order_lines ?? []) if (l.item_id) cart[l.item_id] = (cart[l.item_id] ?? 0) + l.qty
+  return {
+    storeId: o.store_id, cart, due: o.due_date ?? '', time: o.delivery_time, remarks: o.remarks,
+    delivery: { type: o.delivery_type, storeId: '', placeId: '' },
+  }
 }
 
 function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint }: {
@@ -108,12 +175,21 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint }: {
     await reload()
   }
 
+  // 履歴に残す（PDF保存・印刷のとき。メール・FAX・手で送った・取消はデータベースの側で残す）
+  async function keep() {
+    if (o.saved_at) return
+    const { error } = await supabase.rpc('save_orders', { p_ids: [o.id] })
+    if (error) throw error
+  }
+
   async function savePdf() {
     setBusy('pdf'); setError('')
     try {
+      await keep()
       const blob = await uploadPdf()
       downloadBlob(blob, `発注書_${o.order_no}_${o.supplier_snapshot.name}.pdf`)
       void saveToDrive()
+      if (!o.saved_at) await reload()
     } catch (e) { setError(errorText(e)) }
     finally { setBusy('') }
   }
@@ -121,10 +197,12 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint }: {
   // 印刷の前に PDF を作ってドライブに保存する（FAX の欄を付ける前の発注書を保存する）
   async function printWithSave(fax: boolean) {
     setBusy('print'); setError(''); setConfirm(null)
+    try { await keep() } catch (e) { setError(`履歴に残せませんでした：${errorText(e)}`) }
     try {
       if (settings.drive_folder_id) { await uploadPdf(); void saveToDrive() }
     } catch (e) { setError(`Google ドライブ用の PDF を作れませんでした：${errorText(e)}`) }
     finally { setBusy('') }
+    if (!o.saved_at) void reload()
     if (fax) onPrint(true, () => setConfirm(o.status === 'draft' ? 'faxPrinted' : null))
     else onPrint()
   }
@@ -178,7 +256,8 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint }: {
       <div className="sheet-actions no-print">
         <div className="sheet-actions-head">
           <strong>{o.supplier_snapshot.name}</strong>
-          <span className={`chip status-${o.status}`}>{statusLabel[o.status]}</span>
+          {o.saved_at ? <span className={`chip status-${o.status}`}>{statusLabel[o.status]}</span>
+            : <span className="chip status-draft">未保存（まだ履歴にありません）</span>}
           {o.sent_via && <span className="muted small">{viaLabel[o.sent_via]} {jpDateTime(o.sent_at)}{o.sent_to && `（${o.sent_to}）`}</span>}
           <span className="muted small">発注者：{o.orderer?.name || o.orderer?.email || '—'}</span>
           {o.drive_url && <a className="chip" href={o.drive_url} target="_blank" rel="noreferrer">ドライブに保存済み {jpDateTime(o.drive_saved_at)}</a>}

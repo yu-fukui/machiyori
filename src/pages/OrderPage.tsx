@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { go, useApp } from '../lib/app'
 import type { DeliveryPlace, DeliveryType, Item } from '../lib/types'
@@ -7,6 +7,20 @@ import { deliveryLabel, errorText, kindLabel, methodLabel, periodText, readLocal
 const CART_KEY = 'machiyori.cart'
 const STORE_KEY = 'machiyori.store'
 const SORT_KEY = 'machiyori.sort'
+/** 発注書を作ったときの入力の控え。発注書の画面で「保存しない」を選んだら、これを発注画面に戻す */
+export const LAST_KEY = 'machiyori.last'
+/** 発注画面に戻す入力（発注書の画面が書き、発注画面が一度だけ読む） */
+export const RESTORE_KEY = 'machiyori.restore'
+
+export interface OrderForm {
+  ids?: string[]
+  storeId: string
+  cart: Record<string, number>
+  delivery: { type: DeliveryType; storeId: string; placeId: string }
+  due: string
+  time: string
+  remarks: string
+}
 
 type SortKey = 'times' | 'code' | 'name'
 const SORT_LABEL: Record<SortKey, string> = { times: '発注の多い順', code: '品番', name: '品名' }
@@ -14,12 +28,22 @@ const SORT_LABEL: Record<SortKey, string> = { times: '発注の多い順', code:
 function loadCart(): Record<string, number> {
   try { return JSON.parse(readLocal(CART_KEY) || '{}') } catch { return {} }
 }
+function takeRestore(): OrderForm | null {
+  try {
+    const v = readLocal(RESTORE_KEY)
+    if (!v) return null
+    localStorage.removeItem(RESTORE_KEY)
+    return JSON.parse(v)
+  } catch { return null }
+}
 function loadSort(): { key: SortKey; desc: boolean } {
   try { return { key: 'times', desc: true, ...JSON.parse(readLocal(SORT_KEY) || '{}') } } catch { return { key: 'times', desc: true } }
 }
 
 export default function OrderPage() {
   const { stores, suppliers, profile } = useApp()
+  const [restored] = useState(takeRestore)   // 「保存しない」で戻ってきたときの入力
+  const skipReset = useRef(!!restored)
   // 終わった外販は出さない
   const today = todayJst()
   const activeStores = stores.filter(s => s.active && !(s.kind === 'mobile' && s.end_date && s.end_date < today))
@@ -28,17 +52,17 @@ export default function OrderPage() {
   const [stats, setStats] = useState<Record<string, { times: number; qty: number }>>({})
   const [favs, setFavs] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
-  const [storeId, setStoreId] = useState(() => readLocal(STORE_KEY) || profile.default_store_id || '')
+  const [storeId, setStoreId] = useState(() => restored?.storeId || readLocal(STORE_KEY) || profile.default_store_id || '')
   const [q, setQ] = useState('')
   const [sup, setSup] = useState('')
   const [onlyCart, setOnlyCart] = useState(false)
   const [onlyFav, setOnlyFav] = useState(false)
   const [sort, setSort] = useState(loadSort)
-  const [cart, setCart] = useState<Record<string, number>>(loadCart)
-  const [delivery, setDelivery] = useState<{ type: DeliveryType; storeId: string; placeId: string }>({ type: 'store', storeId: '', placeId: '' })
-  const [due, setDue] = useState('')
-  const [time, setTime] = useState('')
-  const [remarks, setRemarks] = useState('')
+  const [cart, setCart] = useState<Record<string, number>>(() => restored?.cart ?? loadCart())
+  const [delivery, setDelivery] = useState<{ type: DeliveryType; storeId: string; placeId: string }>(restored?.delivery ?? { type: 'store', storeId: '', placeId: '' })
+  const [due, setDue] = useState(restored?.due ?? '')
+  const [time, setTime] = useState(restored?.time ?? '')
+  const [remarks, setRemarks] = useState(restored?.remarks ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -73,6 +97,8 @@ export default function OrderPage() {
   // 実店舗は「店舗に納品」か「集荷」だけ。外販は全部から選べて、はじめは会場に納品
   const types: DeliveryType[] = isOutside ? ['venue', 'store', 'pickup', 'address'] : ['store', 'pickup']
   useEffect(() => {
+    // 戻ってきた入力は、はじめの1回だけそのまま使う
+    if (skipReset.current) { skipReset.current = false; return }
     setDelivery(d => ({ ...d, type: isOutside ? 'venue' : (types.includes(d.type) ? d.type : 'store') }))
     // 外販を選んだら、納品希望日に期間の始めを入れる（入れてあれば変えない）
     if (isOutside && store?.start_date) setDue(v => v || store.start_date!)
@@ -139,8 +165,11 @@ export default function OrderPage() {
     })
     setBusy(false)
     if (error) { setError(errorText(error)); return }
+    const ids = data as string[]
+    const form: OrderForm = { ids, storeId, cart, delivery, due, time, remarks }
+    writeLocal(LAST_KEY, JSON.stringify(form))
     setCart({}); setDue(''); setTime(''); setRemarks('')
-    go('sheets/' + (data as string[]).join(','))
+    go('sheets/' + ids.join(','))
   }
 
   const sortButton = (

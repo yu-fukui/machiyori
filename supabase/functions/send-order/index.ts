@@ -135,6 +135,7 @@ Deno.serve(async req => {
 
   await admin.from('orders').update({
     status: 'sent', sent_via: via, sent_to: to, sent_at: new Date().toISOString(), sent_by: user.id,
+    saved_at: order.saved_at ?? new Date().toISOString(),   // 送ったら履歴に残す
   }).eq('id', order_id)
   return json({ ok: true, to })
 })
