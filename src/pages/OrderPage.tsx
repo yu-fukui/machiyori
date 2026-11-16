@@ -102,6 +102,8 @@ export default function OrderPage() {
   const [onlyShort, setOnlyShort] = useState(false)
   const [stock, setStock] = useState<StockData | null | undefined>(undefined)   // undefined は読み込み中、null はまだ一度も読み込んでいない
   const [staleOk, setStaleOk] = useState(false)   // 在庫が古い（ない）まま発注することを確かめたか
+  // 在庫から自動で入れた数量（商品の id → 数）。切り替えで消すとき、手で直していないものだけ消す
+  const [autoFilled, setAutoFilled] = useState<Record<string, number> | null>(null)
   const [stockMsg, setStockMsg] = useState('')
   const [sort, setSort] = useState(loadSort)
   const [cart, setCart] = useState<Record<string, number>>(() => restored?.cart ?? loadCart())
@@ -132,7 +134,7 @@ export default function OrderPage() {
   // 在庫は店舗ごと。店舗を選び直したら、その店舗の在庫を読む
   useEffect(() => {
     try { localStorage.removeItem('machiyori.stock') } catch { /* 前の版がブラウザに残した在庫は使わない */ }
-    setStock(undefined); setStockMsg(''); setStaleOk(false)
+    setStock(undefined); setStockMsg(''); setStaleOk(false); setAutoFilled(null)
     if (!storeId) return
     let live = true
     fetchStock(storeId).then(d => { if (live) setStock(d) }).catch(e => { if (live) setStockMsg(errorText(e)) })
@@ -252,16 +254,48 @@ export default function OrderPage() {
       })
       if (error) throw error
       setStock({ storeId, at: new Date().toISOString(), file: file.name, by: profile.name, qty }); setStaleOk(false)
-      const short = items.filter(i => i.min_stock != null && qty[i.id] !== undefined && qty[i.id] < i.min_stock)
-      setCart(c => {
-        const n = { ...c }
-        for (const i of short) n[i.id] = Math.max(1, i.min_stock! - qty[i.id])
-        return n
-      })
-      setStockMsg(`${Object.keys(qty).length}品の在庫を読み込んで保存しました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。発注ラインを下回った ${short.length}品に発注数を入れました。数は直せます。`)
-      if (short.length) setOnlyShort(true)
+      const filled = fillFromStock(qty)   // 前に自動で入れた数量は、新しい在庫で入れ直す
+      const short = items.filter(i => i.min_stock != null && qty[i.id] !== undefined && qty[i.id] < i.min_stock).length
+      setStockMsg(`${Object.keys(qty).length}品の在庫を読み込んで保存しました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。発注ラインを下回った商品が ${short}品あり、そのうち ${filled}品に数量を入れました。「数量を自動で入れる」で消すこともできます。`)
+      if (short) setOnlyShort(true)
       setSort({ key: 'short', desc: true })
     } catch (e) { setStockMsg(errorText(e)) }
+  }
+
+  // 発注ラインを下回った商品に「発注ライン − 在庫数」を入れる。数量が入っている商品はそのまま。入れた品数を返す
+  function fillFromStock(qty: Record<string, number>) {
+    const prev = autoFilled ?? {}
+    const isAuto = (id: string) => prev[id] !== undefined && cart[id] === prev[id]   // 前に自動で入れて、手で直していない
+    const add: Record<string, number> = {}
+    for (const i of items) {
+      const n = qty[i.id]
+      if (i.min_stock == null || n === undefined || n >= i.min_stock || (cart[i.id] && !isAuto(i.id))) continue
+      add[i.id] = Math.max(1, i.min_stock - n)
+    }
+    setCart(c => {
+      const next = { ...c }
+      for (const [id, q] of Object.entries(prev)) if (next[id] === q) delete next[id]
+      return { ...next, ...add }
+    })
+    setAutoFilled(add)
+    return Object.keys(add).length
+  }
+  // 自動で入れた数量を消す（手で直した数量は残す）
+  function clearAutoFilled() {
+    const auto = autoFilled ?? {}
+    setCart(c => {
+      const n = { ...c }
+      for (const [id, q] of Object.entries(auto)) if (n[id] === q) delete n[id]
+      return n
+    })
+    setAutoFilled(null)
+  }
+  function toggleAuto(on: boolean) {
+    setStockMsg('')
+    if (!on) { clearAutoFilled(); return }
+    if (!stock) return
+    const filled = fillFromStock(stock.qty)
+    setStockMsg(filled ? `発注ラインを下回った ${filled}品に数量を入れました。数は直せます。` : '数量を入れる商品はありませんでした（発注ラインを下回った商品は、もう数量が入っています）。')
   }
 
   const setQty = (id: string, v: number) => setCart(c => {
@@ -364,6 +398,8 @@ export default function OrderPage() {
           <label className="check"><input type="checkbox" checked={onlyCart} onChange={e => setOnlyCart(e.target.checked)} />かごの商品だけ</label>
         </div>
         {stock && <div className="toolbar">
+          <label className="switch"><input type="checkbox" role="switch" checked={!!autoFilled} onChange={e => toggleAuto(e.target.checked)} />
+            <span className="switch-track" aria-hidden="true" />発注ラインを下回った商品に数量を自動で入れる</label>
           <label className="check"><input type="checkbox" checked={onlyShort} onChange={e => setOnlyShort(e.target.checked)} />在庫が発注ラインより少ないものだけ</label>
           <span className="small"><span className="swatch stock-short" />発注ラインを下回った <span className="swatch stock-near" />発注ラインの120%未満</span>
         </div>}
