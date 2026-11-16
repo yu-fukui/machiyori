@@ -1,6 +1,6 @@
 import { forwardRef } from 'react'
 import type { Order, Settings } from '../lib/types'
-import { deliveryLines, deliveryMethodLabel, eraDate, num, yen } from '../lib/format'
+import { deliveryLines, deliveryMethodText, eraDate, isPickup, num, yen } from '../lib/format'
 
 const MIN_ROWS = 10
 
@@ -30,6 +30,7 @@ const OrderSheet = forwardRef<HTMLDivElement, { order: Order; settings: Settings
       )}
       <div className="sheet-meta"><span>発注日　{eraDate(o.order_date)}</span><span className="sub">発注番号 {o.order_no}</span></div>
       <h1 className="sheet-title">発注書</h1>
+      {isPickup(o) && <div className="sheet-pickup">集荷</div>}
       <div className="sheet-parties">
         <div className="sheet-to">
           <div className="name">{s.name}　<span className="nowrap">{s.attention || '御中'}</span></div>
@@ -47,10 +48,10 @@ const OrderSheet = forwardRef<HTMLDivElement, { order: Order; settings: Settings
       <p className="sheet-lead">下記の通り、発注致します。</p>
       <div className="sheet-sum"><div>合計金額</div><div>{yen(o.total)}（税込）</div></div>
       <div className="sheet-info">
-        <div>{dl.whenLabel}</div><div>{dl.when}</div>
+        {dl.hasWhen && <><div>{dl.whenLabel}</div><div>{dl.when}</div></>}
         {cs.payment_terms && <><div>支払条件</div><div>{cs.payment_terms}</div></>}
         <div>販売場所</div><div>{st.name}</div>
-        {o.delivery_type && <><div>納品方法</div><div>{deliveryMethodLabel[o.delivery_type]}</div></>}
+        {deliveryMethodText(o) && <><div>納品方法</div><div className={isPickup(o) ? 'sheet-strong' : undefined}>{deliveryMethodText(o)}</div></>}
         <div>{dl.whereLabel}</div><div>{dl.where}{dl.note && <><br />{dl.note}</>}</div>
       </div>
       <table className="sheet-table">

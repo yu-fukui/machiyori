@@ -54,11 +54,12 @@ export default function App() {
     if (!p.data || p.data.role === 'pending') return
     const [st, su, se] = await Promise.all([
       supabase.from('stores').select('*').order('sort').order('code'),
-      supabase.from('suppliers').select('*').order('name'),
+      supabase.from('suppliers').select('*').order('code'),
       supabase.from('settings').select('*').eq('id', 1).single(),
     ])
     setStores((st.data ?? []) as Store[])
-    setSuppliers((su.data ?? []) as Supplier[])
+    // 取引先はコード順（1, 2, …, 10, 11, …, 101。数字として並べる）
+    setSuppliers(((su.data ?? []) as Supplier[]).sort((a, b) => (a.code ?? '').localeCompare(b.code ?? '', 'ja', { numeric: true })))
     if (se.data) setSettings(se.data as Settings)
   }, [session?.user.id])
 

@@ -35,8 +35,12 @@ export const methodLabel = { fax: 'FAX', email: 'メール' } as const
 export const kindLabel = { fixed: '実店舗', mobile: '外販' } as const
 export const dealLabel = { '': '', buy: '買取', consign: '委託', both: '買取・委託' } as const
 export const deliveryLabel = { venue: '外販の会場に納品', store: '店舗に納品', pickup: '集荷', address: '指定の住所' } as const
-/** 発注書の「納品方法」 */
-export const deliveryMethodLabel = { venue: '会場に納品', store: '店舗納品', pickup: '集荷', address: '指定の住所に納品' } as const
+/** 発注書の「納品方法」：取引先の納品（配達・集荷）。前の版の発注書は発注ごとに選んだ納品先から */
+export function deliveryMethodText(o: Pick<Order, 'delivery_type' | 'supplier_snapshot'>) {
+  if (isPickup(o)) return '集荷'
+  if (o.supplier_snapshot?.delivery_method === 'delivery') return '配達'
+  return ({ venue: '会場に納品', store: '店舗納品', pickup: '集荷', address: '指定の住所に納品' } as const)[o.delivery_type] ?? ''
+}
 
 const md = (s: string) => { const [, m, d] = s.split('-'); return `${+m}/${+d}` }
 /** 外販の期間（例 4/1〜4/10）。日付がなければ空 */
@@ -63,23 +67,28 @@ export function writeLocal(key: string, value: string) {
 }
 
 /** 発注書・メールに出す納品先と日時。納品先を選べるようになる前の発注書は、店の情報から作る */
-export function deliveryLines(o: Pick<Order, 'delivery_type' | 'delivery_time' | 'delivery_snapshot' | 'due_date' | 'store_snapshot'>) {
+/** 集荷か：取引先の「納品」が集荷（いまの決め方）か、前の版で発注ごとに集荷を選んだ */
+export const isPickup = (o: Pick<Order, 'delivery_type' | 'supplier_snapshot'>) =>
+  o.supplier_snapshot?.delivery_method === 'pickup' || o.delivery_type === 'pickup'
+
+export function deliveryLines(o: Pick<Order, 'delivery_type' | 'delivery_time' | 'delivery_snapshot' | 'due_date' | 'store_snapshot' | 'supplier_snapshot'>) {
   const d = o.delivery_snapshot
-  const pickup = o.delivery_type === 'pickup'
+  const pickup = isPickup(o)
   const when = [o.due_date ? jpDate(o.due_date) : '', o.delivery_time].filter(Boolean).join(' ') || 'ご相談'
   let where: string
-  if (!d) {
+  if (pickup) {
+    where = '集荷（貴社へ引き取りに伺います）'
+  } else if (!d) {
     // 納品先を選ばなかった発注書は店舗へ（発注元は会社なので、店舗の住所も載せる）
     const st = o.store_snapshot as { name: string; delivery_note?: string; zip?: string; address?: string }
     where = st.delivery_note || [st.name, [st.zip && `〒${st.zip}`, st.address].filter(Boolean).join(' ')].filter(Boolean).join('　')
-  } else if (pickup) {
-    where = '集荷（貴社へ引き取りに伺います）'
   } else {
     where = [d.name, [d.zip && `〒${d.zip}`, d.address].filter(Boolean).join(' '), d.tel && `TEL ${d.tel}`].filter(Boolean).join('　')
   }
   return {
     whenLabel: pickup ? '集荷日時' : '希望納期',
     when,
+    hasWhen: !!(o.due_date || o.delivery_time),
     whereLabel: pickup ? '受け渡し' : '納品先',
     where,
     note: d?.note ?? '',

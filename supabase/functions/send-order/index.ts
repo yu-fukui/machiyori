@@ -28,16 +28,18 @@ const jpDate = (s: string | null) => {
 // 納品方法と日時・納品先（発注書の「納品方法」「希望納期」「納品先」と同じ書き方）
 function deliveryText(order: Record<string, any>, store: Record<string, any>) {
   const d = order.delivery_snapshot
-  const pickup = order.delivery_type === 'pickup'
+  const supMethod = order.supplier_snapshot?.delivery_method   // 取引先の納品（配達・集荷）
+  const pickup = supMethod === 'pickup' || order.delivery_type === 'pickup'
   const when = [order.due_date ? jpDate(order.due_date) : '', order.delivery_time].filter(Boolean).join(' ') || 'ご相談'
   let where: string
-  if (!d) where = store.delivery_note || store.name
-  else if (pickup) where = '集荷（貴社へ引き取りに伺います）'
+  if (pickup) where = '集荷（貴社へ引き取りに伺います）'
+  else if (!d) where = store.delivery_note || store.name
   else where = [d.name, [d.zip && `〒${d.zip}`, d.address].filter(Boolean).join(' '), d.tel && `TEL ${d.tel}`].filter(Boolean).join('　')
   const method: Record<string, string> = { venue: '会場に納品', store: '店舗納品', pickup: '集荷', address: '指定の住所に納品' }
+  const methodText = pickup ? '集荷' : supMethod === 'delivery' ? '配達' : method[order.delivery_type]
   return [
-    ...(method[order.delivery_type] ? [`納品方法：${method[order.delivery_type]}`] : []),
-    `${pickup ? '集荷日時' : '希望納期'}：${when}`,
+    ...(methodText ? [`納品方法：${methodText}`] : []),
+    ...(order.due_date || order.delivery_time ? [`${pickup ? '集荷日時' : '希望納期'}：${when}`] : []),
     `${pickup ? '受け渡し' : '納品先'}：${where}`,
     ...(d?.note ? [`　${d.note}`] : []),
   ]
