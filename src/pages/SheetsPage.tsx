@@ -64,14 +64,17 @@ export default function SheetsPage({ ids }: { ids: string[] }) {
   const mailTargets = pending.filter(o => supOf(o).send_method === 'email' && supOf(o).email)
   const faxByPrint = !settings.fax_gateway
 
-  // FAX の発注書をまとめて印刷する（会社の FAX 機・複合機の FAX ドライバーで送る）
-  async function bulkFaxPrint() {
-    const ids = faxTargets.map(o => o.id)
-    setBulkBusy('fax'); setBulkMsg('')
+  // 全部の発注書を一度に印刷する（取消したものは除く）。印刷の前に履歴に残し、ドライブに保存する
+  // 印刷したあと、まだ送っていない発注書があれば「送れましたか」とたずねて、まとめて送信済みにできる
+  const printable = orders.filter(o => o.status !== 'cancelled')
+  async function printAll() {
+    const ids = printable.map(o => o.id)
+    const drafts = printable.filter(o => o.status === 'draft').map(o => o.id)
+    setBulkBusy('print'); setBulkMsg(''); setBulk(null)
     for (const id of ids) await apis.current.get(id)?.prepare()
     setBulkBusy('')
     await load()
-    print(ids, true, () => setBulk({ kind: 'faxSent', ids }))
+    print(ids, false, () => { if (drafts.length) setBulk({ kind: 'faxSent', ids: drafts }) })
   }
 
   // まとめて記録する：印刷して FAX で送れた発注書を送信済みにする
@@ -127,15 +130,13 @@ export default function SheetsPage({ ids }: { ids: string[] }) {
     <div>
       <div className="toolbar no-print">
         <button className="btn" onClick={back}>← 発注画面へ</button>
-        {orders.length > 1 && <button className="btn" onClick={() => print(orders.map(o => o.id))}>すべて印刷</button>}
+        {printable.length > 1 && <button className="btn primary" disabled={!!bulkBusy} onClick={printAll}>{bulkBusy === 'print' ? '準備中…' : `全部の発注書を印刷（${printable.length}枚）`}</button>}
         <span className="muted small">{orders.length}枚。{unsaved.length > 0 ? '送る（メール・FAX・印刷・PDFを保存）と履歴に残ります。' : ''}</span>
       </div>
-      {pending.length > 1 && (faxTargets.length > 0 || mailTargets.length > 0) && (
+      {pending.length > 1 && ((!faxByPrint && faxTargets.length > 0) || mailTargets.length > 0) && (
         <div className="toolbar no-print bulk">
           <strong className="small">まとめて：</strong>
-          {faxTargets.length > 0 && (faxByPrint
-            ? <button className="btn primary" disabled={!!bulkBusy} onClick={bulkFaxPrint}>{bulkBusy === 'fax' ? '準備中…' : `FAX の発注書をまとめて印刷（${faxTargets.length}枚）`}</button>
-            : <button className="btn primary" disabled={!!bulkBusy} onClick={() => setBulk({ kind: 'fax', ids: faxTargets.map(o => o.id) })}>{`FAX でまとめて送る（${faxTargets.length}件）`}</button>)}
+          {!faxByPrint && faxTargets.length > 0 && <button className="btn primary" disabled={!!bulkBusy} onClick={() => setBulk({ kind: 'fax', ids: faxTargets.map(o => o.id) })}>{bulkBusy === 'fax' ? '送信中…' : `インターネットFAX でまとめて送る（${faxTargets.length}件）`}</button>}
           {mailTargets.length > 0 && <button className="btn primary" disabled={!!bulkBusy} onClick={() => setBulk({ kind: 'email', ids: mailTargets.map(o => o.id) })}>{bulkBusy === 'email' ? '送信中…' : `メールでまとめて送る（${mailTargets.length}件）`}</button>}
           <span className="muted small">送り方が「FAX」「メール」の取引先で、まだ送っていない発注書が対象です。</span>
         </div>
@@ -143,15 +144,15 @@ export default function SheetsPage({ ids }: { ids: string[] }) {
       {bulk && (
         <div className="confirm no-print">
           {bulk.kind === 'faxSent' && <>
-            <p>印刷した <b>{bulk.ids.length}枚</b> を、FAX で送れましたか？ 全部送れたら「全部送れた」を押してください。送信済みとして記録します。</p>
-            <p className="muted small">送れなかった発注書があるときは「1枚ずつ記録する」を押し、送れた発注書の「手で送った」を押してください。</p>
+            <p>印刷した発注書のうち、まだ送っていない <b>{bulk.ids.length}枚</b> を、取引先に送れましたか（FAX・手渡しなど）？ 全部送れたら「全部送れた」を押してください。送信済みとして記録します。</p>
+            <p className="muted small">送れなかった発注書があるときは「あとで1枚ずつ記録する」を押し、送れた発注書の「手で送った」を押してください。</p>
           </>}
           {bulk.kind === 'email' && <p><b>{bulk.ids.length}件</b> の発注書を、それぞれの取引先にメールで送ります（PDF を付けます）。</p>}
           {bulk.kind === 'fax' && <p><b>{bulk.ids.length}件</b> の発注書を、インターネットFAX で送ります。</p>}
           <div className="row">
             {bulk.kind === 'faxSent'
               ? <><button className="btn primary" disabled={!!bulkBusy} onClick={() => bulkMarkSent(bulk.ids)}>{bulkBusy ? '記録中…' : '全部送れた'}</button>
-                  <button className="btn" disabled={!!bulkBusy} onClick={() => setBulk(null)}>1枚ずつ記録する</button></>
+                  <button className="btn" disabled={!!bulkBusy} onClick={() => setBulk(null)}>あとで1枚ずつ記録する</button></>
               : <><button className="btn primary" disabled={!!bulkBusy} onClick={() => bulkSend(bulk.kind as 'email' | 'fax', bulk.ids)}>{bulk.kind === 'email' ? 'メールを送る' : 'FAX を送る'}</button>
                   <button className="btn" disabled={!!bulkBusy} onClick={() => setBulk(null)}>やめる</button></>}
           </div>
@@ -290,8 +291,8 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint, regis
     await prepare()
     setBusy('')
     if (!o.saved_at) void reload()
-    if (fax) onPrint(true, () => setConfirm(o.status === 'draft' ? 'faxPrinted' : null))
-    else onPrint()
+    // 印刷したあと、まだ送っていなければ「送れましたか」とたずねる
+    onPrint(fax, () => setConfirm(o.status === 'draft' ? 'faxPrinted' : null))
   }
 
   async function send(via: 'email' | 'fax', quiet = false) {
@@ -346,7 +347,6 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint, regis
   const isPrimary = (m: 'email' | 'fax') => sup.send_method === m ? 'btn primary' : 'btn'
   const closed = o.status === 'cancelled'
 
-  const faxPrint = () => printWithSave(true)
 
   return (
     <section className={printTarget ? 'sheet-block print-target' : 'sheet-block'}>
@@ -361,10 +361,10 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint, regis
         </div>
         <div className="row">
           <button className="btn" disabled={!!busy} onClick={savePdf}>{busy === 'pdf' ? '作成中…' : 'PDFを保存'}</button>
-          <button className="btn" disabled={!!busy} onClick={() => printWithSave(false)}>{busy === 'print' ? '準備中…' : '印刷'}</button>
+          <button className={faxByPrint && sup.send_method === 'fax' ? 'btn primary' : 'btn'} disabled={!!busy} onClick={() => printWithSave(false)}>{busy === 'print' ? '準備中…' : 'この発注書だけ印刷'}</button>
           <button className={isPrimary('email')} disabled={!!busy || closed || !mailTo} title={mailTo ? '' : '取引先にメールアドレスがありません'} onClick={() => setConfirm('email')}>メールで送る</button>
-          <button className={isPrimary('fax')} disabled={!!busy || closed || !(faxTo || faxByPrint)} title={sup.fax ? '' : '取引先に FAX 番号がありません'}
-            onClick={() => faxByPrint ? faxPrint() : setConfirm('fax')}>{faxByPrint ? 'FAXで送る（印刷）' : 'FAXで送る'}</button>
+          {!faxByPrint && <button className={isPrimary('fax')} disabled={!!busy || closed || !faxTo} title={sup.fax ? '' : '取引先に FAX 番号がありません'}
+            onClick={() => setConfirm('fax')}>インターネットFAXで送る</button>}
           {o.status === 'draft' && <button className="btn" disabled={!!busy} onClick={() => setConfirm('printed')}>手で送った</button>}
           {!closed && remarks === null && <button className="btn" disabled={!!busy} onClick={() => setRemarks(o.remarks)}>備考を書く</button>}
           {!closed && <button className="btn quiet" disabled={!!busy} onClick={() => setConfirm('cancel')}>取り消す</button>}
@@ -380,14 +380,14 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint, regis
             </div>
           </div>
         )}
-        {faxByPrint && !closed && <p className="muted small">「FAXで送る（印刷）」を押すと、FAX 用の発注書を印刷します。印刷画面のプリンターで複合機の FAX ドライバー（または FAX 機）を選び、宛先に <b>{sup.fax}</b> を入れて送ってください。</p>}
+        {faxByPrint && !closed && sup.send_method === 'fax' && <p className="muted small">FAX は、印刷して複合機・FAX 機から <b>{sup.fax || '（FAX 番号が未登録）'}</b> に送ってください。印刷画面のプリンターで複合機の FAX ドライバーを選んでも送れます。</p>}
 
         {confirm && (
           <div className="confirm">
             {confirm === 'email' && <p><b>{mailTo}</b> に、発注書の PDF（{fileName}）を付けてメールで送ります。</p>}
             {confirm === 'fax' && <p><b>FAX {sup.fax}</b> に送ります（インターネットFAX の宛先 {faxTo}）。</p>}
             {confirm === 'printed' && <p>印刷して FAX 機などで送ったことを記録します。</p>}
-            {confirm === 'faxPrinted' && <p><b>FAX {sup.fax}</b> に送れましたか？ 送れたら「送れた」を押してください。送信済みとして記録します。</p>}
+            {confirm === 'faxPrinted' && <p>印刷した発注書を、取引先に送れましたか（{sup.fax ? `FAX ${sup.fax}` : 'FAX'}・手渡しなど）？ 送れたら「送れた」を押してください。送信済みとして記録します。</p>}
             {confirm === 'cancel' && <p>この発注書を「取消」にします。{o.status === 'sent' && '送った相手には、別に取消の連絡をしてください。'}</p>}
             {o.status === 'sent' && (confirm === 'email' || confirm === 'fax') && <p className="warn">この発注書は送信済みです。もう一度送ります。</p>}
             <div className="row">
@@ -397,7 +397,7 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint, regis
                 {busy ? '処理中…' : confirm === 'email' ? 'メールを送る' : confirm === 'fax' ? 'FAX を送る'
                   : confirm === 'printed' ? '記録する' : confirm === 'faxPrinted' ? '送れた' : '取り消す'}
               </button>
-              {confirm === 'faxPrinted' && <button className="btn" disabled={!!busy} onClick={faxPrint}>もう一度印刷する</button>}
+              {confirm === 'faxPrinted' && <button className="btn" disabled={!!busy} onClick={() => printWithSave(false)}>もう一度印刷する</button>}
               <button className="btn" disabled={!!busy} onClick={() => setConfirm(null)}>{confirm === 'faxPrinted' ? 'まだ送っていない' : 'やめる'}</button>
             </div>
           </div>
