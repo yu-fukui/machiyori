@@ -156,7 +156,8 @@ export default function OrderPage() {
   useEffect(() => {
     // 戻ってきた入力は、はじめの1回だけそのまま使う
     if (skipReset.current) { skipReset.current = false; return }
-    setDelivery(d => ({ ...d, type: isOutside ? 'venue' : (types.includes(d.type) ? d.type : 'store') }))
+    // はじめは店舗に登録した納品のしかた（集荷か、店舗納品。外販の店舗納品は会場に納品）
+    setDelivery(d => ({ ...d, type: store?.delivery_method === 'pickup' ? 'pickup' : isOutside ? 'venue' : 'store' }))
     // 外販を選んだら、納品希望日に期間の始めを入れる（入れてあれば変えない）
     if (isOutside && store?.start_date) setDue(v => v || store.start_date!)
   }, [storeId, isOutside]) // eslint-disable-line react-hooks/exhaustive-deps

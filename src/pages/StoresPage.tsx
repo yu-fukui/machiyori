@@ -14,6 +14,10 @@ export default function StoresPage() {
       options: [{ value: 'fixed', label: kindLabel.fixed }, { value: 'mobile', label: kindLabel.mobile }], help: '外販は1回ごとに登録します（名称・場所・期間）', render: r => kindLabel[r.kind] },
     { key: 'start_date', label: '期間の始め（外販）', type: 'date', render: r => r.kind === 'mobile' ? (periodText(r) || <span className="muted">期間なし</span>) : '' },
     { key: 'end_date', label: '期間の終わり（外販）', type: 'date', help: '終わった外販は発注の画面に出なくなります', render: false },
+    { key: 'delivery_method', label: '納品のしかた', type: 'select', required: true,
+      options: [{ value: 'store', label: '店舗納品（外販は会場に納品）' }, { value: 'pickup', label: '集荷' }],
+      help: '発注画面で、この店舗を選んだときにはじめに選ばれます（発注ごとに変えられます）。発注書の「納品方法」に載ります',
+      render: r => <span className="chip">{r.delivery_method === 'pickup' ? '集荷' : '店舗納品'}</span> },
     { key: 'zip', label: '郵便番号', render: false },
     { key: 'address', label: '住所（外販は会場の場所）' },
     { key: 'tel', label: '電話' },
@@ -29,6 +33,7 @@ export default function StoresPage() {
       code: String(v.code ?? '').trim().toUpperCase(), name: v.name?.trim(), kind: v.kind === 'mobile' ? 'mobile' : 'fixed',
       zip: v.zip ?? '', address: v.address ?? '', tel: v.tel ?? '', fax: v.fax ?? '', email: v.email ?? '',
       person: v.person ?? '', sort: Number(v.sort) || 0, active: v.active ?? true,
+      delivery_method: v.delivery_method === 'pickup' ? 'pickup' : 'store',
       start_date: v.kind === 'mobile' ? v.start_date || null : null,
       end_date: v.kind === 'mobile' ? v.end_date || null : null,
     }
@@ -42,9 +47,9 @@ export default function StoresPage() {
   return (
     <MasterTable<Store>
       title="店舗"
-      note="発注書の差出人になります。外販は1回ごとに、名称・会場の場所（住所）・期間を登録します。外販のときに選べる別の納品先の住所は「納品先」画面で登録します。直した内容は、これから作る発注書から反映されます（作った発注書はそのまま）。"
+      note="発注書の「販売場所」に載ります（発注元は「設定」の会社）。外販は1回ごとに、名称・会場の場所（住所）・期間を登録します。外販のときに選べる別の納品先の住所は「納品先」画面で登録します。直した内容は、これから作る発注書から反映されます（作った発注書はそのまま）。"
       rows={stores} fields={fields} canEdit={isAdmin} addLabel="店舗を追加"
-      blank={{ kind: 'fixed', active: true, sort: 0, start_date: null, end_date: null }}
+      blank={{ kind: 'fixed', delivery_method: 'store', active: true, sort: 0, start_date: null, end_date: null }}
       onSave={save}
     />
   )

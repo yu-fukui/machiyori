@@ -20,6 +20,7 @@ export interface Store {
   email: string
   person: string
   delivery_note: string
+  delivery_method: 'store' | 'pickup'   // 納品のしかた。store：店舗納品（外販は会場に納品）、pickup：集荷
   active: boolean
   sort: number
   start_date: string | null   // 外販の期間

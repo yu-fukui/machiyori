@@ -1,6 +1,6 @@
 import { forwardRef } from 'react'
 import type { Order, Settings } from '../lib/types'
-import { deliveryLines, eraDate, num, yen } from '../lib/format'
+import { deliveryLines, deliveryMethodLabel, eraDate, num, yen } from '../lib/format'
 
 const MIN_ROWS = 10
 
@@ -50,6 +50,7 @@ const OrderSheet = forwardRef<HTMLDivElement, { order: Order; settings: Settings
         <div>{dl.whenLabel}</div><div>{dl.when}</div>
         {cs.payment_terms && <><div>支払条件</div><div>{cs.payment_terms}</div></>}
         <div>販売場所</div><div>{st.name}</div>
+        {o.delivery_type && <><div>納品方法</div><div>{deliveryMethodLabel[o.delivery_type]}</div></>}
         <div>{dl.whereLabel}</div><div>{dl.where}{dl.note && <><br />{dl.note}</>}</div>
       </div>
       <table className="sheet-table">
