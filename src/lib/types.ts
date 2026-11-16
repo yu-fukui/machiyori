@@ -53,7 +53,8 @@ export interface Item {
   sale_price: number | null  // 販売価格（税込）
   tax_rate: 8 | 10
   barcode: string           // バーコード（Airレジ）。品番で見つからないとき、在庫 CSV の「バーコード」と結びつける
-  min_stock: number | null   // 発注ライン（最低在庫数）。在庫がこれを下回ったら発注する。空なら在庫 CSV で自動の発注数を入れない
+  min_stock: number | null   // 発注ライン。手で発注するときの目安（在庫がこれを下回ると発注画面の行が赤くなる）
+  target_stock: number | null   // 設定在庫数。在庫 CSV から自動で入れる数量は「設定在庫数 − 在庫」。空なら自動で入れない
   active: boolean
 }
 

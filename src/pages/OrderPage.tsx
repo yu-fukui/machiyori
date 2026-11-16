@@ -218,7 +218,7 @@ export default function OrderPage() {
     return i.min_stock != null && n !== undefined && n < i.min_stock
   }
 
-  // Airレジの在庫 CSV を読み、発注ラインを下回った商品に「発注ライン − 在庫数」の発注数を入れる
+  // Airレジの在庫 CSV を読み、設定在庫数より少ない商品に「設定在庫数 − 在庫数」の数量を入れる
   async function readStock(file: File | undefined) {
     if (!file) return
     setStockMsg('')
@@ -258,22 +258,22 @@ export default function OrderPage() {
       setStock({ storeId, at: new Date().toISOString(), file: file.name, by: profile.name, qty }); setStaleOk(false)
       const filled = fillFromStock(qty)   // 前に自動で入れた数量は、新しい在庫で入れ直す
       const short = items.filter(i => i.min_stock != null && qty[i.id] !== undefined && qty[i.id] < i.min_stock).length
-      setStockMsg(`${Object.keys(qty).length}品の在庫を読み込んで保存しました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。発注ラインを下回った商品が ${short}品あり、そのうち ${filled}品に数量を入れました。「数量を自動で入れる」で消すこともできます。`)
+      setStockMsg(`${Object.keys(qty).length}品の在庫を読み込んで保存しました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。発注ラインを下回った商品は ${short}品です。設定在庫数より少ない ${filled}品に「設定在庫数 − 在庫」の数量を入れました。「数量を自動で入れる」で消すこともできます。`)
       if (short) setOnlyShort(true)
       setSort({ key: 'short', desc: true })
     } catch (e) { setStockMsg(errorText(e)) }
   }
 
-  // 発注ラインを下回った商品に「発注ライン − 在庫数」を入れる。数量が入っている商品はそのまま。入れた品数を返す
+  // 設定在庫数より在庫が少ない商品に「設定在庫数 − 在庫数」を入れる。数量が入っている商品はそのまま。入れた品数を返す
   function fillFromStock(qty: Record<string, number>) {
     const prev = autoFilled ?? {}
     const isAuto = (id: string) => prev[id] !== undefined && cart[id] === prev[id]   // 前に自動で入れて、手で直していない
     const add: Record<string, number> = {}
     for (const i of items) {
       const n = qty[i.id]
-      if (i.min_stock == null || n === undefined || n >= i.min_stock || (cart[i.id] && !isAuto(i.id))) continue
+      if (i.target_stock == null || n === undefined || n >= i.target_stock || (cart[i.id] && !isAuto(i.id))) continue
       if (supById[i.supplier_id]?.no_order) continue   // 発注しない取引先（100番台の生産者さんなど）
-      add[i.id] = Math.max(1, i.min_stock - n)
+      add[i.id] = i.target_stock - n
     }
     setCart(c => {
       const next = { ...c }
@@ -298,7 +298,7 @@ export default function OrderPage() {
     if (!on) { clearAutoFilled(); return }
     if (!stock) return
     const filled = fillFromStock(stock.qty)
-    setStockMsg(filled ? `発注ラインを下回った ${filled}品に数量を入れました。数は直せます。` : '数量を入れる商品はありませんでした（発注ラインを下回った商品は、もう数量が入っています）。')
+    setStockMsg(filled ? `設定在庫数より少ない ${filled}品に「設定在庫数 − 在庫」の数量を入れました。数は直せます。` : '数量を入れる商品はありませんでした（設定在庫数が空か、在庫が足りているか、もう数量が入っています）。')
   }
 
   const setQty = (id: string, v: number) => setCart(c => {
@@ -402,14 +402,14 @@ export default function OrderPage() {
         </div>
         {stock && <div className="toolbar">
           <label className="switch"><input type="checkbox" role="switch" checked={!!autoFilled} onChange={e => toggleAuto(e.target.checked)} />
-            <span className="switch-track" aria-hidden="true" />発注ラインを下回った商品に数量を自動で入れる</label>
+            <span className="switch-track" aria-hidden="true" />設定在庫数に足りない数を自動で入れる</label>
           <label className="check"><input type="checkbox" checked={onlyShort} onChange={e => setOnlyShort(e.target.checked)} />在庫が発注ラインより少ないものだけ</label>
           <span className="small"><span className="swatch stock-short" />発注ラインを下回った <span className="swatch stock-near" />発注ラインの120%未満</span>
         </div>}
         {stockMsg && <p className="note small">{stockMsg}</p>}
         <div className="tbl-wrap">
           <table className="list">
-            <thead><tr><th aria-label="お気に入り" /><th>品番（Airレジ）</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">在庫</th><th className="num">発注ライン</th><th className="num">数量</th></tr></thead>
+            <thead><tr><th aria-label="お気に入り" /><th>品番（Airレジ）</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">在庫</th><th className="num">発注ライン</th><th className="num">設定在庫数</th><th className="num">数量</th></tr></thead>
             <tbody>
               {rows.map(i => (
                 <tr key={i.id} className={[cart[i.id] ? 'picked' : '', stockLevel(i) ? `stock-${stockLevel(i)}` : ''].join(' ').trim() || undefined}>
@@ -422,6 +422,7 @@ export default function OrderPage() {
                   <td className="num">{yen(i.price)}</td>
                   <td className="num">{stock?.qty[i.id] ?? '—'}</td>
                   <td className="num sub">{i.min_stock ?? '—'}</td>
+                  <td className="num sub">{i.target_stock ?? '—'}</td>
                   <td className="num">
                     <span className="qty">
                       <button className="btn small" aria-label={`${i.name}を減らす`} onClick={() => setQty(i.id, (cart[i.id] || 0) - 1)}>−</button>
@@ -432,7 +433,7 @@ export default function OrderPage() {
                   </td>
                 </tr>
               ))}
-              {!loading && rows.length === 0 && <tr><td colSpan={8} className="muted">
+              {!loading && rows.length === 0 && <tr><td colSpan={9} className="muted">
                 {items.length === 0 ? '商品がまだありません。「商品」画面で登録するか、CSV で読み込んでください。'
                   : onlyFav && favs.size === 0 ? 'お気に入りはまだありません。商品の ☆ を押すと登録できます。' : '該当する商品がありません。'}
               </td></tr>}
