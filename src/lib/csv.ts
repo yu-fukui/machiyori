@@ -7,9 +7,14 @@ export async function readCsv(file: File): Promise<Record<string, string>[]> {
   let text = new TextDecoder('utf-8').decode(buf)
   if (text.includes('�')) text = new TextDecoder('shift_jis').decode(buf)
   text = text.replace(/^﻿/, '')
-  // Airレジの CSV は1行目が「"v200"」のような版の行で、列名は2行目にある。区切りのない1行目は飛ばす
-  const first = text.split(/\r?\n/, 1)[0]
-  if (first && !first.includes(',')) text = text.slice(first.length).replace(/^\r?\n/, '')
+  // Airレジの CSV は1行目が「"v200"」のような版の行で、列名は2行目にある。
+  // Excel で保存し直すと「v200,,,,」になることもあるので、中身が1つ以下の先頭の行は飛ばす
+  for (;;) {
+    const first = text.split(/\r?\n/, 1)[0]
+    const filled = first.split(',').filter(c => c.replace(/"/g, '').trim() !== '').length
+    if (filled > 1 || first.length === text.length) break
+    text = text.slice(first.length).replace(/^\r?\n/, '')
+  }
   const res = Papa.parse<Record<string, string>>(text, {
     header: true,
     skipEmptyLines: 'greedy',

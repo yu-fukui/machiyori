@@ -183,7 +183,7 @@ export default function OrderPage() {
         return d ? d * dir : byCode(a, b)
       }
       if (sort.key === 'short') {
-        // 足りない数（発注ライン − 在庫数）で並べる。在庫か発注ラインがない商品は、いつもいちばん後ろ
+        // 足りない数（設定在庫数 − 在庫数）で並べる。在庫か設定在庫数がない商品は、いつもいちばん後ろ
         const sa = shortBy(a), sb = shortBy(b)
         if (sa === null || sb === null) return sa === sb ? byCode(a, b) : sa === null ? 1 : -1
         return (sa - sb) * dir || byCode(a, b)
@@ -199,10 +199,10 @@ export default function OrderPage() {
     return Object.entries(g).sort((a, b) => (supName[a[0]] ?? '').localeCompare(supName[b[0]] ?? '', 'ja'))
   }, [items, cart, supName])
 
-  // 足りない数（発注ライン − 在庫数）。在庫か発注ラインがなければ null
+  // 足りない数（設定在庫数 − 在庫数）。在庫か設定在庫数がなければ null
   function shortBy(i: Item) {
     const n = stock?.qty[i.id]
-    return i.min_stock == null || n === undefined ? null : i.min_stock - n
+    return i.target_stock == null || n === undefined ? null : i.target_stock - n
   }
   // 行の色：在庫が発注ラインを下回ったら赤、発注ラインの 120% を切ったら黄
   function stockLevel(i: Item): 'short' | 'near' | null {
@@ -259,7 +259,6 @@ export default function OrderPage() {
       const filled = fillFromStock(qty)   // 前に自動で入れた数量は、新しい在庫で入れ直す
       const short = items.filter(i => i.min_stock != null && qty[i.id] !== undefined && qty[i.id] < i.min_stock).length
       setStockMsg(`${Object.keys(qty).length}品の在庫を読み込んで保存しました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。発注ラインを下回った商品は ${short}品です。設定在庫数より少ない ${filled}品に「設定在庫数 − 在庫」の数量を入れました。「数量を自動で入れる」で消すこともできます。`)
-      if (short) setOnlyShort(true)
       setSort({ key: 'short', desc: true })
     } catch (e) { setStockMsg(errorText(e)) }
   }
