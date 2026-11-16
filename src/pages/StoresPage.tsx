@@ -16,7 +16,7 @@ export default function StoresPage() {
     { key: 'end_date', label: '期間の終わり（外販）', type: 'date', help: '終わった外販は発注の画面に出なくなります', render: false },
     { key: 'zip', label: '郵便番号', render: false },
     { key: 'address', label: '住所（外販は会場の場所）' },
-    { key: 'tel', label: '電話' },
+    { key: 'tel', label: '電話', render: r => <span className="nowrap">{r.tel}</span> },
     { key: 'fax', label: 'FAX', render: false },
     { key: 'email', label: 'メール', type: 'email', help: '取引先からの返信先にもなります', render: false },
     { key: 'person', label: '発注担当', render: false },
@@ -42,7 +42,7 @@ export default function StoresPage() {
   return (
     <MasterTable<Store>
       title="店舗"
-      note="発注書の「販売場所」に載ります（発注元は「設定」の会社）。外販は1回ごとに、名称・会場の場所（住所）・期間を登録します。外販のときに選べる別の納品先の住所は「納品先」画面で登録します。直した内容は、これから作る発注書から反映されます（作った発注書はそのまま）。"
+      note="発注書の「販売場所」に載ります（発注元は「設定」の会社）。外販は1回ごとに、名称・会場の場所（住所）・期間を登録します。直した内容は、これから作る発注書から反映されます（作った発注書はそのまま）。"
       rows={stores} fields={fields} canEdit={isAdmin} addLabel="店舗を追加"
       blank={{ kind: 'fixed', active: true, sort: 0, start_date: null, end_date: null }}
       onSave={save}
