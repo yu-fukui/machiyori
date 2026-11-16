@@ -8,16 +8,29 @@ import { readCsv } from '../lib/csv'
 const CART_KEY = 'machiyori.cart'
 const STORE_KEY = 'machiyori.store'
 const SORT_KEY = 'machiyori.sort'
-const STOCK_KEY = 'machiyori.stock'
 
 /** Airレジの在庫 CSV の列の名前（どれか1つあればよい） */
 const STOCK_ID_COLS = ['商品ID', '商品コード', '品番', 'バーコード', 'JANコード', 'JAN']
 /** 足りない数と最低発注数の大きいほうを発注数にする */
 const orderQty = (i: Item, short: number) => Math.max(i.min_order_qty || 1, short)
 const STOCK_QTY_COLS = ['在庫数', '現在庫数', '現在在庫数', '在庫数量', '在庫']
-interface StockData { at: string; file: string; qty: Record<string, number> }   // qty：商品の id → 在庫数
-function loadStock(): StockData | null {
-  try { return JSON.parse(readLocal(STOCK_KEY) || 'null') } catch { return null }
+interface StockData { storeId: string; at: string; file: string; qty: Record<string, number> }   // qty：商品の id → 在庫数
+/** データベースから、その店舗のいちばん新しい在庫を読む（読み込んだことがなければ null） */
+async function fetchStock(storeId: string): Promise<StockData | null> {
+  const { data: imp, error } = await supabase.from('stock_imports').select('file_name, imported_at')
+    .eq('store_id', storeId).order('imported_at', { ascending: false }).limit(1).maybeSingle()
+  if (error) throw error
+  if (!imp) return null
+  const qty: Record<string, number> = {}
+  // 一度に返る行の数に上限があるので、1000 行ずつ読む
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from('stock_levels').select('item_id, qty')
+      .eq('store_id', storeId).order('item_id').range(from, from + 999)
+    if (error) throw error
+    for (const r of data ?? []) qty[r.item_id as string] = r.qty as number
+    if (!data || data.length < 1000) break
+  }
+  return { storeId, at: imp.imported_at as string, file: imp.file_name as string, qty }
 }
 /** 発注書を作ったときの入力の控え。発注書の画面で「保存しない」を選んだら、これを発注画面に戻す */
 export const LAST_KEY = 'machiyori.last'
@@ -70,7 +83,7 @@ export default function OrderPage() {
   const [onlyCart, setOnlyCart] = useState(false)
   const [onlyFav, setOnlyFav] = useState(false)
   const [onlyShort, setOnlyShort] = useState(false)
-  const [stock, setStock] = useState<StockData | null>(loadStock)
+  const [stock, setStock] = useState<StockData | null>(null)
   const [stockMsg, setStockMsg] = useState('')
   const [sort, setSort] = useState(loadSort)
   const [cart, setCart] = useState<Record<string, number>>(() => restored?.cart ?? loadCart())
@@ -98,6 +111,15 @@ export default function OrderPage() {
   useEffect(() => {
     if (!activeStores.some(s => s.id === storeId) && activeStores[0]) setStoreId(activeStores[0].id)
   }, [activeStores, storeId])
+  // 在庫は店舗ごと。店舗を選び直したら、その店舗の在庫を読む
+  useEffect(() => {
+    try { localStorage.removeItem('machiyori.stock') } catch { /* 前の版がブラウザに残した在庫は使わない */ }
+    setStock(null); setStockMsg('')
+    if (!storeId) return
+    let live = true
+    fetchStock(storeId).then(d => { if (live) setStock(d) }).catch(e => { if (live) setStockMsg(errorText(e)) })
+    return () => { live = false }
+  }, [storeId])
   // 発注の多い順は、店舗ごとの発注の記録から数える
   useEffect(() => {
     if (!storeId) return
@@ -170,6 +192,7 @@ export default function OrderPage() {
   async function readStock(file: File | undefined) {
     if (!file) return
     setStockMsg('')
+    if (!storeId) { setStockMsg('先に店舗を選んでください。在庫は店舗ごとに保存します。'); return }
     try {
       const raw = await readCsv(file)
       const head = Object.keys(raw[0] ?? {})
@@ -193,17 +216,22 @@ export default function OrderPage() {
         const item = keys.map(k => byAir.get(k)).find(Boolean) ?? keys.map(k => byCode.get(k)).find(Boolean)
         const n = Number((r[qtyCol] ?? '').replace(/,/g, ''))
         if (!item || !Number.isFinite(n)) { miss++; continue }
-        qty[item.id] = n
+        qty[item.id] = Math.round(n)
       }
-      const data = { at: new Date().toISOString(), file: file.name, qty }
-      setStock(data); writeLocal(STOCK_KEY, JSON.stringify(data))
+      // データベースに保存する（この店舗の前の在庫は置き換わる）
+      const { error } = await supabase.rpc('import_stock', {
+        p_store_id: storeId, p_file: file.name, p_miss: miss,
+        p_rows: Object.entries(qty).map(([item_id, n]) => ({ item_id, qty: n })),
+      })
+      if (error) throw error
+      setStock({ storeId, at: new Date().toISOString(), file: file.name, qty })
       const short = items.filter(i => i.min_stock != null && qty[i.id] !== undefined && qty[i.id] < i.min_stock)
       setCart(c => {
         const n = { ...c }
         for (const i of short) n[i.id] = orderQty(i, i.min_stock! - qty[i.id])
         return n
       })
-      setStockMsg(`${Object.keys(qty).length}品の在庫を読み込みました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。最低在庫数を下回った ${short.length}品に発注数を入れました。数は直せます。`)
+      setStockMsg(`${Object.keys(qty).length}品の在庫を読み込んで保存しました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。最低在庫数を下回った ${short.length}品に発注数を入れました。数は直せます。`)
       if (short.length) setOnlyShort(true)
       setSort({ key: 'short', desc: true })
     } catch (e) { setStockMsg(errorText(e)) }
@@ -279,9 +307,9 @@ export default function OrderPage() {
           <label className="check"><input type="checkbox" checked={onlyCart} onChange={e => setOnlyCart(e.target.checked)} />かごの商品だけ</label>
         </div>
         <div className="toolbar">
-          <label className="btn">在庫 CSV を読み込む（Airレジ）<input type="file" accept=".csv,text/csv" hidden onChange={e => { readStock(e.target.files?.[0]); e.target.value = '' }} /></label>
+          <label className="btn">在庫 CSV を読み込んで保存する（Airレジ）<input type="file" accept=".csv,text/csv" hidden onChange={e => { readStock(e.target.files?.[0]); e.target.value = '' }} /></label>
           {stock && <label className="check"><input type="checkbox" checked={onlyShort} onChange={e => setOnlyShort(e.target.checked)} />在庫が最低在庫数より少ないものだけ</label>}
-          {stock && <span className="muted small">在庫：{stock.file}（{jpDateTime(stock.at)} に読み込み）</span>}
+          {stock && <span className="muted small">在庫：{stores.find(s => s.id === stock.storeId)?.name}・{stock.file}（{jpDateTime(stock.at)} に読み込み。みんなで同じ在庫を見ます）</span>}
         </div>
         {stockMsg && <p className="note small">{stockMsg}</p>}
         <div className="tbl-wrap">
