@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { go, useApp } from '../lib/app'
 import type { DeliveryPlace, DeliveryType, Item } from '../lib/types'
-import { deliveryLabel, errorText, jpDateTime, kindLabel, methodLabel, periodText, readLocal, todayJst, writeLocal, yen } from '../lib/format'
+import { deliveryLabel, errorText, kindLabel, methodLabel, periodText, readLocal, todayJst, writeLocal, yen } from '../lib/format'
 import { readCsv } from '../lib/csv'
 
 const CART_KEY = 'machiyori.cart'
@@ -12,10 +12,28 @@ const SORT_KEY = 'machiyori.sort'
 /** Airレジの在庫 CSV の列の名前（どれか1つあればよい） */
 const STOCK_ID_COLS = ['商品ID', '商品コード', '品番', 'バーコード', 'JANコード', 'JAN']
 const STOCK_QTY_COLS = ['在庫数', '現在庫数', '現在在庫数', '在庫数量', '在庫']
-interface StockData { storeId: string; at: string; file: string; qty: Record<string, number> }   // qty：商品の id → 在庫数
+interface StockData { storeId: string; at: string; file: string; by: string; qty: Record<string, number> }   // qty：商品の id → 在庫数
+
+/** 在庫 CSV は週に1回読み込む。これより古いと「古い」として、発注の前に確かめてもらう */
+const STOCK_STALE_DAYS = 7
+/** Airレジの CSV のファイル名にある書き出しの日時（例 …_20261116135848.csv）。なければ null */
+function exportedAt(file: string): Date | null {
+  const m = file.match(/(20\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/)
+  if (!m) return null
+  const d = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}+09:00`)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+const stockDate = (d: Date) => d.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' })
+/** 在庫がどれだけ前のものか。データの日時は、ファイル名の書き出し日時（なければ読み込んだ日時） */
+function stockAge(s: StockData) {
+  const imported = new Date(s.at)
+  const data = exportedAt(s.file) ?? imported
+  const days = Math.floor((Date.now() - data.getTime()) / 86400000)
+  return { data, imported, days, stale: days >= STOCK_STALE_DAYS }
+}
 /** データベースから、その店舗のいちばん新しい在庫を読む（読み込んだことがなければ null） */
 async function fetchStock(storeId: string): Promise<StockData | null> {
-  const { data: imp, error } = await supabase.from('stock_imports').select('file_name, imported_at')
+  const { data: imp, error } = await supabase.from('stock_imports').select('file_name, imported_at, profiles(name)')
     .eq('store_id', storeId).order('imported_at', { ascending: false }).limit(1).maybeSingle()
   if (error) throw error
   if (!imp) return null
@@ -28,7 +46,8 @@ async function fetchStock(storeId: string): Promise<StockData | null> {
     for (const r of data ?? []) qty[r.item_id as string] = r.qty as number
     if (!data || data.length < 1000) break
   }
-  return { storeId, at: imp.imported_at as string, file: imp.file_name as string, qty }
+  const by = (imp.profiles as unknown as { name: string } | null)?.name ?? ''
+  return { storeId, at: imp.imported_at as string, file: imp.file_name as string, by, qty }
 }
 /** 発注書を作ったときの入力の控え。発注書の画面で「保存しない」を選んだら、これを発注画面に戻す */
 export const LAST_KEY = 'machiyori.last'
@@ -81,7 +100,8 @@ export default function OrderPage() {
   const [onlyCart, setOnlyCart] = useState(false)
   const [onlyFav, setOnlyFav] = useState(false)
   const [onlyShort, setOnlyShort] = useState(false)
-  const [stock, setStock] = useState<StockData | null>(null)
+  const [stock, setStock] = useState<StockData | null | undefined>(undefined)   // undefined は読み込み中、null はまだ一度も読み込んでいない
+  const [staleOk, setStaleOk] = useState(false)   // 在庫が古い（ない）まま発注することを確かめたか
   const [stockMsg, setStockMsg] = useState('')
   const [sort, setSort] = useState(loadSort)
   const [cart, setCart] = useState<Record<string, number>>(() => restored?.cart ?? loadCart())
@@ -112,7 +132,7 @@ export default function OrderPage() {
   // 在庫は店舗ごと。店舗を選び直したら、その店舗の在庫を読む
   useEffect(() => {
     try { localStorage.removeItem('machiyori.stock') } catch { /* 前の版がブラウザに残した在庫は使わない */ }
-    setStock(null); setStockMsg('')
+    setStock(undefined); setStockMsg(''); setStaleOk(false)
     if (!storeId) return
     let live = true
     fetchStock(storeId).then(d => { if (live) setStock(d) }).catch(e => { if (live) setStockMsg(errorText(e)) })
@@ -231,7 +251,7 @@ export default function OrderPage() {
         p_rows: Object.entries(qty).map(([item_id, n]) => ({ item_id, qty: n })),
       })
       if (error) throw error
-      setStock({ storeId, at: new Date().toISOString(), file: file.name, qty })
+      setStock({ storeId, at: new Date().toISOString(), file: file.name, by: profile.name, qty }); setStaleOk(false)
       const short = items.filter(i => i.min_stock != null && qty[i.id] !== undefined && qty[i.id] < i.min_stock)
       setCart(c => {
         const n = { ...c }
@@ -283,6 +303,15 @@ export default function OrderPage() {
     go('sheets/' + ids.join(','))
   }
 
+  // 在庫の新しさ。古い（ない）ときは発注書を作る前に確かめてもらう
+  const age = stock ? stockAge(stock) : null
+  const stockState: 'loading' | 'none' | 'stale' | 'ok' = stock === undefined ? 'loading' : !stock ? 'none' : age!.stale ? 'stale' : 'ok'
+  const needStaleOk = stockState === 'none' || stockState === 'stale'
+  const storeName = stores.find(s => s.id === storeId)?.name ?? ''
+  const stockInput = (
+    <label className="btn">在庫 CSV を読み込んで保存する（Airレジ）<input type="file" accept=".csv,text/csv" hidden onChange={e => { readStock(e.target.files?.[0]); e.target.value = '' }} /></label>
+  )
+
   const sortButton = (
     <button className="btn" onClick={() => setSort(s => ({ ...s, desc: !s.desc }))} aria-label="並びを逆にする"
       title={sort.desc ? '多い順・後ろから（降順）' : '少ない順・前から（昇順）'}>
@@ -292,6 +321,27 @@ export default function OrderPage() {
 
   return (
     <div className="grid-order">
+      {storeId && stockState !== 'loading' && (
+        <section className={`stock-banner ${stockState}`} aria-live="polite">
+          <div className="stock-banner-main">
+            {stockState === 'ok' && <>
+              <div className="stock-banner-label">在庫データ（{storeName}）</div>
+              <div className="stock-banner-date">{stockDate(age!.data)} 時点{age!.days === 0 ? '（今日）' : `（${age!.days}日前）`}</div>
+            </>}
+            {stockState === 'stale' && <>
+              <div className="stock-banner-label">⚠ 在庫データが古いです（{storeName}）</div>
+              <div className="stock-banner-date">{stockDate(age!.data)} 時点（{age!.days}日前）</div>
+              <div>このまま発注すると、いまの在庫と合わない数になるおそれがあります。発注の前に、Airレジから新しい在庫 CSV を書き出して読み込んでください。</div>
+            </>}
+            {stockState === 'none' && <>
+              <div className="stock-banner-label">⚠ 在庫データがありません（{storeName}）</div>
+              <div>この店舗の在庫 CSV はまだ読み込まれていません。発注の前に、Airレジから在庫 CSV を書き出して読み込んでください。</div>
+            </>}
+            {stock && <div className="small">ファイル：{stock.file}　読み込み：{stockDate(age!.imported)}{stock.by && `（${stock.by}）`}</div>}
+          </div>
+          <div>{stockInput}</div>
+        </section>
+      )}
       <section className="panel">
         <div className="panel-head">
           <h2>商品を選ぶ</h2>
@@ -313,12 +363,10 @@ export default function OrderPage() {
           <label className="check"><input type="checkbox" checked={onlyFav} onChange={e => setOnlyFav(e.target.checked)} />★ お気に入りだけ</label>
           <label className="check"><input type="checkbox" checked={onlyCart} onChange={e => setOnlyCart(e.target.checked)} />かごの商品だけ</label>
         </div>
-        <div className="toolbar">
-          <label className="btn">在庫 CSV を読み込んで保存する（Airレジ）<input type="file" accept=".csv,text/csv" hidden onChange={e => { readStock(e.target.files?.[0]); e.target.value = '' }} /></label>
-          {stock && <label className="check"><input type="checkbox" checked={onlyShort} onChange={e => setOnlyShort(e.target.checked)} />在庫が発注ラインより少ないものだけ</label>}
-          {stock && <span className="small"><span className="swatch stock-short" />発注ラインを下回った <span className="swatch stock-near" />発注ラインの120%未満</span>}
-          {stock && <span className="muted small">在庫：{stores.find(s => s.id === stock.storeId)?.name}・{stock.file}（{jpDateTime(stock.at)} に読み込み。みんなで同じ在庫を見ます）</span>}
-        </div>
+        {stock && <div className="toolbar">
+          <label className="check"><input type="checkbox" checked={onlyShort} onChange={e => setOnlyShort(e.target.checked)} />在庫が発注ラインより少ないものだけ</label>
+          <span className="small"><span className="swatch stock-short" />発注ラインを下回った <span className="swatch stock-near" />発注ラインの120%未満</span>
+        </div>}
         {stockMsg && <p className="note small">{stockMsg}</p>}
         <div className="tbl-wrap">
           <table className="list">
@@ -422,7 +470,15 @@ export default function OrderPage() {
           </div>
           <div className="field"><label htmlFor="remarks">備考（この発注の全部の発注書に入ります。発注書ごとにもあとで書けます）</label><textarea id="remarks" value={remarks} onChange={e => setRemarks(e.target.value)} /></div>
           {error && <p className="msg">{error}</p>}
-          <button className="btn primary wide" disabled={busy || groups.length === 0 || !storeId || !deliveryReady} onClick={create}>
+          {groups.length > 0 && needStaleOk && (
+            <div className="stock-confirm">
+              <b>{stockState === 'none' ? '在庫データがありません。' : `在庫データが ${age!.days}日前のものです。`}</b>
+              <span>先に新しい在庫 CSV を読み込むのがおすすめです。</span>
+              <label className="check"><input type="checkbox" checked={staleOk} onChange={e => setStaleOk(e.target.checked)} />
+                {stockState === 'none' ? '在庫を読み込まないまま発注書を作る' : '古い在庫のまま発注書を作る'}</label>
+            </div>
+          )}
+          <button className="btn primary wide" disabled={busy || groups.length === 0 || !storeId || !deliveryReady || (needStaleOk && !staleOk)} onClick={create}>
             {busy ? '作成中…' : `発注書を作成（${groups.length}枚）`}
           </button>
           {groups.length > 0 && !deliveryReady && <p className="warn small">納品先を選んでください。</p>}
