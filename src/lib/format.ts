@@ -17,6 +17,14 @@ export function eraDate(s: string | null | undefined) {
     .format(new Date(Date.UTC(y, m - 1, d)))
 }
 
+/** 曜日つきの日付：2026年11月13日（金） */
+export function jpDateW(s: string | null | undefined) {
+  if (!s) return ''
+  const [y, m, d] = s.slice(0, 10).split('-').map(Number)
+  const w = '日月火水木金土'[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]
+  return `${y}年${m}月${d}日（${w}）`
+}
+
 export function jpDateTime(s: string | null | undefined) {
   if (!s) return ''
   return new Date(s).toLocaleString('ja-JP', {
@@ -74,7 +82,9 @@ export const isPickup = (o: Pick<Order, 'delivery_type' | 'supplier_snapshot'>) 
 export function deliveryLines(o: Pick<Order, 'delivery_type' | 'delivery_time' | 'delivery_snapshot' | 'due_date' | 'store_snapshot' | 'supplier_snapshot'>) {
   const d = o.delivery_snapshot
   const pickup = isPickup(o)
-  const when = [o.due_date ? jpDate(o.due_date) : '', o.delivery_time].filter(Boolean).join(' ') || 'ご相談'
+  // 希望納期：2026年11月13日（金）に納品をお願いいたします。（集荷は「集荷に伺います」）
+  const date = [o.due_date ? jpDateW(o.due_date) : '', o.delivery_time].filter(Boolean).join(' ')
+  const when = date ? `${date}に${pickup ? '集荷に伺います' : '納品をお願いいたします'}。` : 'ご相談'
   let where: string
   if (pickup) {
     where = '集荷（貴社へ引き取りに伺います）'

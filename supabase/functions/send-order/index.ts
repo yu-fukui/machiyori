@@ -25,12 +25,19 @@ const jpDate = (s: string | null) => {
   return `${y}年${+m}月${+d}日`
 }
 
+const jpDateW = (s: string) => {
+  const [y, m, d] = s.split('-').map(Number)
+  return `${y}年${m}月${d}日（${'日月火水木金土'[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}）`
+}
+
 // 納品方法と日時・納品先（発注書の「納品方法」「希望納期」「納品先」と同じ書き方）
 function deliveryText(order: Record<string, any>, store: Record<string, any>) {
   const d = order.delivery_snapshot
   const supMethod = order.supplier_snapshot?.delivery_method   // 取引先の納品（配達・集荷）
   const pickup = supMethod === 'pickup' || order.delivery_type === 'pickup'
-  const when = [order.due_date ? jpDate(order.due_date) : '', order.delivery_time].filter(Boolean).join(' ') || 'ご相談'
+  // 希望納期：2026年11月13日（金）に納品をお願いいたします。（集荷は「集荷に伺います」。発注書と同じ書き方）
+  const date = [order.due_date ? jpDateW(order.due_date) : '', order.delivery_time].filter(Boolean).join(' ')
+  const when = date ? `${date}に${pickup ? '集荷に伺います' : '納品をお願いいたします'}。` : 'ご相談'
   let where: string
   if (pickup) where = '集荷（貴社へ引き取りに伺います）'
   else if (!d) where = store.delivery_note || store.name

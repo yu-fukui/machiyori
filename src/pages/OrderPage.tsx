@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { go, useApp } from '../lib/app'
 import type { DeliveryType, Item } from '../lib/types'
-import { errorText, kindLabel, methodLabel, periodText, readLocal, todayJst, writeLocal, yen } from '../lib/format'
+import { errorText, jpDateW, kindLabel, methodLabel, periodText, readLocal, todayJst, writeLocal, yen } from '../lib/format'
 import { readCsv } from '../lib/csv'
 
 const CART_KEY = 'machiyori.cart'
@@ -327,7 +327,7 @@ export default function OrderPage() {
     const lines = groups.flatMap(([, ls]) => ls.map(l => ({ item_id: l.item.id, qty: l.qty })))
     const { data, error } = await supabase.rpc('create_orders', {
       // 納品希望日・時間・備考は発注画面では入れない（備考は発注書の画面で1枚ずつ書ける）
-      p_store_id: storeId, p_due_date: null, p_remarks: '', p_lines: lines,
+      p_store_id: storeId, p_due_date: due || null, p_remarks: '', p_lines: lines,
       p_delivery: { type: isOutside ? 'venue' : 'store', store_id: null, place_id: null, time: '' },
     })
     setBusy(false)
@@ -477,6 +477,11 @@ export default function OrderPage() {
         })}
 
         <div className="cart-group">
+          <div className="field">
+            <label htmlFor="due">希望納期</label>
+            <input id="due" type="date" min={todayJst()} value={due} onChange={e => setDue(e.target.value)} />
+            <span className="muted small">{due ? `発注書に「${jpDateW(due)}に納品をお願いいたします。」と載ります（集荷の取引先は「集荷に伺います」）` : '空なら発注書に載りません'}</span>
+          </div>
           {error && <p className="msg">{error}</p>}
           {groups.length > 0 && needStaleOk && (
             <div className="stock-confirm">
