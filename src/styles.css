@@ -51,6 +51,9 @@ code { font-size: 13px; background: var(--chip); padding: 0 4px; border-radius: 
 .stock-banner.stale .stock-banner-label, .stock-banner.none .stock-banner-label { color: var(--danger); font-size: 16px; }
 .stock-confirm { border: 2px solid var(--danger); border-radius: 6px; padding: 8px 10px; margin: 8px 0; display: grid; gap: 4px; font-size: 14px; }
 .stock-confirm b { color: var(--danger); }
+.cart-due { display: flex; gap: 8px; align-items: center; margin-top: 6px; font-size: 13px; }
+.cart-due label { color: var(--muted); white-space: nowrap; }
+.cart-due input { flex: 1; min-width: 0; }
 @media (max-width: 900px) { .grid-order { grid-template-columns: minmax(0, 1fr); } .cart { position: static; max-height: none; } }
 
 .toolbar, .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

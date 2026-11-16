@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { go, useApp } from '../lib/app'
 import type { DeliveryType, Item } from '../lib/types'
-import { errorText, jpDateW, kindLabel, methodLabel, periodText, readLocal, todayJst, writeLocal, yen } from '../lib/format'
+import { errorText, jpDateW, kindLabel, nextFriday, methodLabel, periodText, readLocal, todayJst, writeLocal, yen } from '../lib/format'
 import { readCsv } from '../lib/csv'
 
 const CART_KEY = 'machiyori.cart'
@@ -111,7 +111,10 @@ export default function OrderPage() {
   const [sort, setSort] = useState(loadSort)
   const [cart, setCart] = useState<Record<string, number>>(() => restored?.cart ?? loadCart())
   const [delivery, setDelivery] = useState<{ type: DeliveryType; storeId: string; placeId: string }>(restored?.delivery ?? { type: 'store', storeId: '', placeId: '' })
-  const [due, setDue] = useState(restored?.due ?? '')
+  // 取引先ごとの希望納期のはじめの値：発注した日の次の金曜（金曜に発注したら翌週の金曜）
+  const [due, setDue] = useState(() => restored?.due || nextFriday(todayJst()))
+  const [dueBy, setDueBy] = useState<Record<string, string>>({})   // 取引先ごとの希望納期（取引先の id → 日付）
+  const dueOf = (sid: string) => dueBy[sid] ?? due
   const [time, setTime] = useState(restored?.time ?? '')
   const [remarks, setRemarks] = useState(restored?.remarks ?? '')
   const [busy, setBusy] = useState(false)
@@ -158,8 +161,6 @@ export default function OrderPage() {
     if (skipReset.current) { skipReset.current = false; return }
     // 納品のしかたは取引先ごと（発注書に載る）。発注画面では選ばない：実店舗は店舗へ、外販は会場へ
     setDelivery(d => ({ ...d, type: isOutside ? 'venue' : 'store' }))
-    // 外販を選んだら、納品希望日に期間の始めを入れる（入れてあれば変えない）
-    if (isOutside && store?.start_date) setDue(v => v || store.start_date!)
   }, [storeId, isOutside]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const supName = useMemo(() => Object.fromEntries(suppliers.map(s => [s.id, s.name])), [suppliers])
@@ -326,16 +327,26 @@ export default function OrderPage() {
     setBusy(true); setError('')
     const lines = groups.flatMap(([, ls]) => ls.map(l => ({ item_id: l.item.id, qty: l.qty })))
     const { data, error } = await supabase.rpc('create_orders', {
-      // 納品希望日・時間・備考は発注画面では入れない（備考は発注書の画面で1枚ずつ書ける）
+      // 時間・備考は発注画面では入れない（備考は発注書の画面で1枚ずつ書ける）。希望納期はこのあと取引先ごとに書く
       p_store_id: storeId, p_due_date: due || null, p_remarks: '', p_lines: lines,
       p_delivery: { type: isOutside ? 'venue' : 'store', store_id: null, place_id: null, time: '' },
     })
-    setBusy(false)
-    if (error) { setError(errorText(error)); return }
+    if (error) { setBusy(false); setError(errorText(error)); return }
     const ids = data as string[]
+    // 取引先ごとの希望納期を、それぞれの発注書に書く（はじめの値と違うものだけ）
+    const diff = groups.map(([sid]) => sid).filter(sid => dueOf(sid) !== due)
+    if (diff.length) {
+      const { data: made } = await supabase.from('orders').select('id, supplier_id').in('id', ids)
+      for (const o of (made ?? []) as { id: string; supplier_id: string }[]) {
+        if (!diff.includes(o.supplier_id)) continue
+        const { error: e2 } = await supabase.from('orders').update({ due_date: dueOf(o.supplier_id) || null }).eq('id', o.id)
+        if (e2) { setBusy(false); setError(`発注書は作れましたが、希望納期を書けませんでした：${errorText(e2)}`); return }
+      }
+    }
+    setBusy(false)
     const form: OrderForm = { ids, storeId, cart, delivery, due, time, remarks }
     writeLocal(LAST_KEY, JSON.stringify(form))
-    setCart({}); setAutoFilled(null); setDue(''); setTime(''); setRemarks('')
+    setCart({}); setAutoFilled(null); setDue(nextFriday(todayJst())); setDueBy({}); setTime(''); setRemarks('')
     go('sheets/' + ids.join(','))
   }
 
@@ -472,16 +483,17 @@ export default function OrderPage() {
               <h3><span>{s?.name}</span>{s && <span className="chip">{methodLabel[s.send_method]}</span>}{s?.delivery_method === 'pickup' && <span className="chip status-draft">集荷</span>}</h3>
               {ls.map(l => <div className="cart-line" key={l.item.id}><span>{l.item.name} × {l.qty}</span><span>{yen(l.item.price * l.qty)}</span></div>)}
               <div className="cart-line strong"><span>小計（税抜）</span><span>{yen(sub)}</span></div>
+              <div className="cart-due">
+                <label htmlFor={`due-${sid}`}>{s?.delivery_method === 'pickup' ? '集荷日' : '希望納期'}</label>
+                <input id={`due-${sid}`} type="date" min={todayJst()} value={dueOf(sid)} onChange={e => setDueBy(d => ({ ...d, [sid]: e.target.value }))} />
+                {dueOf(sid) && <button type="button" className="btn small quiet" onClick={() => setDueBy(d => ({ ...d, [sid]: '' }))}>消す</button>}
+              </div>
             </div>
           )
         })}
 
         <div className="cart-group">
-          <div className="field">
-            <label htmlFor="due">希望納期</label>
-            <input id="due" type="date" min={todayJst()} value={due} onChange={e => setDue(e.target.value)} />
-            <span className="muted small">{due ? `発注書に「${jpDateW(due)}に納品をお願いいたします。」と載ります（集荷の取引先は「集荷に伺います」）` : '空なら発注書に載りません'}</span>
-          </div>
+          {groups.length > 0 && <p className="muted small">希望納期は取引先ごとに入れます。はじめは次の金曜です。入れると発注書に「{jpDateW(dueOf(groups[0][0]) || todayJst())}に納品をお願いいたします。」のように載ります（集荷の取引先は「集荷に伺います」）。空なら載りません。発注書の画面でも1枚ずつ直せます。</p>}
           {error && <p className="msg">{error}</p>}
           {groups.length > 0 && needStaleOk && (
             <div className="stock-confirm">

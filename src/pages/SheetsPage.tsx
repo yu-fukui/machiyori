@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { go, useApp } from '../lib/app'
 import type { Order } from '../lib/types'
-import { errorText, faxAddress, jpDateTime, readLocal, statusLabel, viaLabel, writeLocal } from '../lib/format'
+import { errorText, faxAddress, isPickup, jpDateTime, jpDateW, readLocal, statusLabel, viaLabel, writeLocal } from '../lib/format'
 import { downloadBlob, sheetPdf } from '../lib/pdf'
 import OrderSheet from '../components/OrderSheet'
 import { LAST_KEY, RESTORE_KEY, type OrderForm } from './OrderPage'
@@ -220,6 +220,7 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint, regis
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [remarks, setRemarks] = useState<string | null>(null)   // 備考を書いているあいだの文
+  const [dueEdit, setDueEdit] = useState<string | null>(null)   // 希望納期を直しているあいだの日付
 
   // 宛先は今の取引先の情報から取る（作ったあとに直したメール・FAX 番号も使えるように）
   const sup = suppliers.find(s => s.id === o.supplier_id) ?? o.supplier_snapshot
@@ -324,6 +325,17 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint, regis
     return () => register(o.id, null)
   }, [o.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function saveDue() {
+    if (dueEdit === null) return
+    setBusy('due'); setError('')
+    const { error } = await supabase.from('orders').update({ due_date: dueEdit || null }).eq('id', o.id)
+    setBusy('')
+    if (error) { setError(errorText(error)); return }
+    setDueEdit(null)
+    toast('希望納期を保存しました')
+    await reload()
+  }
+
   async function saveRemarks() {
     if (remarks === null) return
     setBusy('remarks'); setError('')
@@ -366,9 +378,25 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint, regis
           {!faxByPrint && <button className={isPrimary('fax')} disabled={!!busy || closed || !faxTo} title={sup.fax ? '' : '取引先に FAX 番号がありません'}
             onClick={() => setConfirm('fax')}>インターネットFAXで送る</button>}
           {o.status === 'draft' && <button className="btn" disabled={!!busy} onClick={() => setConfirm('printed')}>手で送った</button>}
+          {!closed && dueEdit === null && <button className="btn" disabled={!!busy} onClick={() => setDueEdit(o.due_date ?? '')}>希望納期を変える</button>}
           {!closed && remarks === null && <button className="btn" disabled={!!busy} onClick={() => setRemarks(o.remarks)}>備考を書く</button>}
           {!closed && <button className="btn quiet" disabled={!!busy} onClick={() => setConfirm('cancel')}>取り消す</button>}
         </div>
+        {dueEdit !== null && (
+          <div className="confirm remarks-edit">
+            <label htmlFor={`due-${o.id}`}>この発注書の希望納期</label>
+            <div className="row">
+              <input id={`due-${o.id}`} type="date" value={dueEdit} autoFocus onChange={e => setDueEdit(e.target.value)} />
+              {dueEdit && <span className="small">「{jpDateW(dueEdit)}に{isPickup(o) ? '集荷に伺います' : '納品をお願いいたします'}。」と載ります</span>}
+              {!dueEdit && <span className="small muted">空なら発注書に載りません</span>}
+            </div>
+            {o.status === 'sent' && <p className="warn small">この発注書は送信済みです。直した希望納期は相手に届いていません。直したあと、もう一度送ってください。</p>}
+            <div className="row">
+              <button className="btn primary" disabled={!!busy} onClick={saveDue}>{busy === 'due' ? '保存中…' : '希望納期を保存'}</button>
+              <button className="btn" disabled={!!busy} onClick={() => setDueEdit(null)}>やめる</button>
+            </div>
+          </div>
+        )}
         {remarks !== null && (
           <div className="confirm remarks-edit">
             <label htmlFor={`remarks-${o.id}`}>この発注書の備考</label>

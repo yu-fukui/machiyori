@@ -17,6 +17,14 @@ export function eraDate(s: string | null | undefined) {
     .format(new Date(Date.UTC(y, m - 1, d)))
 }
 
+/** 次の金曜（YYYY-MM-DD）。基準の日が金曜なら翌週の金曜。希望納期のはじめの値 */
+export function nextFriday(from: string) {
+  const [y, m, d] = from.slice(0, 10).split('-').map(Number)
+  const t = new Date(Date.UTC(y, m - 1, d))
+  t.setUTCDate(t.getUTCDate() + (((5 - t.getUTCDay() + 7) % 7) || 7))
+  return t.toISOString().slice(0, 10)
+}
+
 /** 曜日つきの日付：2026年11月13日（金） */
 export function jpDateW(s: string | null | undefined) {
   if (!s) return ''
