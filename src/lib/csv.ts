@@ -6,7 +6,11 @@ export async function readCsv(file: File): Promise<Record<string, string>[]> {
   const buf = await file.arrayBuffer()
   let text = new TextDecoder('utf-8').decode(buf)
   if (text.includes('�')) text = new TextDecoder('shift_jis').decode(buf)
-  const res = Papa.parse<Record<string, string>>(text.replace(/^﻿/, ''), {
+  text = text.replace(/^﻿/, '')
+  // Airレジの CSV は1行目が「"v200"」のような版の行で、列名は2行目にある。区切りのない1行目は飛ばす
+  const first = text.split(/\r?\n/, 1)[0]
+  if (first && !first.includes(',')) text = text.slice(first.length).replace(/^\r?\n/, '')
+  const res = Papa.parse<Record<string, string>>(text, {
     header: true,
     skipEmptyLines: 'greedy',
     transformHeader: h => h.trim(),

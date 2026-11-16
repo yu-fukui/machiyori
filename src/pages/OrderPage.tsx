@@ -46,7 +46,7 @@ export interface OrderForm {
 }
 
 type SortKey = 'times' | 'short' | 'code' | 'name'
-const SORT_LABEL: Record<SortKey, string> = { times: '発注の多い順', short: '在庫の足りない順', code: '品番', name: '品名' }
+const SORT_LABEL: Record<SortKey, string> = { times: '発注の多い順', short: '在庫の足りない順', code: '品番（Airレジ）', name: '品名' }
 
 function loadCart(): Record<string, number> {
   try { return JSON.parse(readLocal(CART_KEY) || '{}') } catch { return {} }
@@ -208,18 +208,19 @@ export default function OrderPage() {
         setStockMsg(`在庫 CSV の列が見つかりません。「${STOCK_ID_COLS.join('・')}」のどれかと「${STOCK_QTY_COLS.join('・')}」のどれかの列が要ります。（この CSV の列：${head.join('、') || 'なし'}）`)
         return
       }
-      // 先に品番（Airレジ）で結びつけ、見つからなければ品番で探す
-      const byAir = new Map<string, Item>()
+      // 先に品番（Airレジの商品ID）で結びつけ、見つからなければバーコードで探す
       const byCode = new Map<string, Item>()
+      const byBarcode = new Map<string, Item>()
       for (const i of items) {
-        if (i.airregi_code) byAir.set(i.airregi_code, i)
         if (i.code) byCode.set(i.code, i)
+        if (i.barcode) byBarcode.set(i.barcode, i)
       }
       const qty: Record<string, number> = {}
       let miss = 0
       for (const r of raw) {
-        const keys = idCols.map(c => (r[c] ?? '').replace(/^'/, '').trim()).filter(Boolean)
-        const item = keys.map(k => byAir.get(k)).find(Boolean) ?? keys.map(k => byCode.get(k)).find(Boolean)
+        // Airレジのバーコードは頭に # が付く
+        const keys = idCols.map(c => (r[c] ?? '').replace(/^['#]/, '').trim()).filter(Boolean)
+        const item = keys.map(k => byCode.get(k)).find(Boolean) ?? keys.map(k => byBarcode.get(k)).find(Boolean)
         const n = Number((r[qtyCol] ?? '').replace(/,/g, ''))
         if (!item || !Number.isFinite(n)) { miss++; continue }
         qty[item.id] = Math.round(n)
@@ -321,7 +322,7 @@ export default function OrderPage() {
         {stockMsg && <p className="note small">{stockMsg}</p>}
         <div className="tbl-wrap">
           <table className="list">
-            <thead><tr><th aria-label="お気に入り" /><th>品番</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">在庫</th><th className="num">発注ライン</th><th className="num">数量</th></tr></thead>
+            <thead><tr><th aria-label="お気に入り" /><th>品番（Airレジ）</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">在庫</th><th className="num">発注ライン</th><th className="num">数量</th></tr></thead>
             <tbody>
               {rows.map(i => (
                 <tr key={i.id} className={[cart[i.id] ? 'picked' : '', stockLevel(i) ? `stock-${stockLevel(i)}` : ''].join(' ').trim() || undefined}>

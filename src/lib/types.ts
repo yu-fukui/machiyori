@@ -43,14 +43,14 @@ export interface Supplier {
 export interface Item {
   id: string
   supplier_id: string
-  code: string | null
+  code: string | null      // 品番（Airレジ）。Airレジの商品ID。在庫 CSV の「商品ID」と結びつける
   name: string
   spec: string
   unit: string
   price: number              // 仕入れ価格（税抜）。発注書にはこれを載せる
   sale_price: number | null  // 販売価格（税込）
   tax_rate: 8 | 10
-  airregi_code: string      // 品番（Airレジ）。Airレジの商品ID。在庫 CSV と結びつける
+  barcode: string           // バーコード（Airレジ）。品番で見つからないとき、在庫 CSV の「バーコード」と結びつける
   min_stock: number | null   // 発注ライン（最低在庫数）。在庫がこれを下回ったら発注する。空なら在庫 CSV で自動の発注数を入れない
   active: boolean
 }
