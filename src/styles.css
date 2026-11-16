@@ -85,7 +85,11 @@ textarea { width: 100%; min-height: 64px; resize: vertical; }
 .switch input:checked + .switch-track { background: var(--accent); }
 .switch input:checked + .switch-track::after { left: 21px; }
 .switch input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
-.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0 12px; align-items: end; }
+/* 入力欄の高さを揃える：見出しと入力欄を上に揃え、説明文は入力欄の下へ。チェックボックスは入力欄の段に合わせる */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0 12px; align-items: start; }
+.form-grid > .field > label { min-height: 1.6em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.form-grid > .check { margin-top: 30px; }
+.form-grid > .field > input, .form-grid > .field > select { box-sizing: border-box; height: 38px; }
 .edit-form { border: 1px solid var(--accent); border-radius: 8px; padding: 4px 16px 16px; margin-bottom: 16px; }
 .note { font-size: 13px; color: var(--muted); background: var(--chip); border-radius: 6px; padding: 10px 12px; margin: 0 0 12px; }
 .msg { color: var(--danger); margin: 8px 0; white-space: pre-wrap; }

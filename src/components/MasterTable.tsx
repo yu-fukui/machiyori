@@ -87,7 +87,7 @@ export default function MasterTable<T extends { id: string }>(p: Props<T>) {
               )
               return (
                 <div className="field" key={f.key}>
-                  <label htmlFor={id}>{f.label}{f.required && ' *'}</label>
+                  <label htmlFor={id} title={f.label}>{f.label}{f.required && ' *'}</label>
                   {f.type === 'select'
                     ? <select id={id} value={String(v ?? '')} required={f.required} onChange={e => set(f.key, e.target.value)}>
                         {!f.required && <option value="">—</option>}
