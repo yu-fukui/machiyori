@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabase'
 import { go, useApp } from '../lib/app'
 import type { DeliveryType, Item } from '../lib/types'
 import { errorText, jpDateW, kindLabel, nextFriday, methodLabel, periodText, readLocal, todayJst, writeLocal, yen } from '../lib/format'
-import { readCsv } from '../lib/csv'
+import { readCsv, writeCsv } from '../lib/csv'
+import { HEADERS as ITEM_HEADERS } from './ItemsPage'
 
 const CART_KEY = 'machiyori.cart'
 const AUTO_KEY = 'machiyori.autofilled'   // 在庫から自動で入れた数量（開き直してもオフで消せるように残す）
@@ -108,6 +109,8 @@ export default function OrderPage() {
   })
   const [clearAsk, setClearAsk] = useState(false)   // 「数量をすべてクリア」の確かめ
   const [stockMsg, setStockMsg] = useState('')
+  // 在庫 CSV にあって、商品に登録していない行（Airレジの商品ID・商品名・カテゴリー・バーコード・在庫数）
+  const [unknown, setUnknown] = useState<{ id: string; name: string; category: string; barcode: string; qty: string }[]>([])
   const [sort, setSort] = useState(loadSort)
   const [cart, setCart] = useState<Record<string, number>>(() => restored?.cart ?? loadCart())
   const [delivery, setDelivery] = useState<{ type: DeliveryType; storeId: string; placeId: string }>(restored?.delivery ?? { type: 'store', storeId: '', placeId: '' })
@@ -139,7 +142,7 @@ export default function OrderPage() {
   // 在庫は店舗ごと。店舗を選び直したら、その店舗の在庫を読む
   useEffect(() => {
     try { localStorage.removeItem('machiyori.stock') } catch { /* 前の版がブラウザに残した在庫は使わない */ }
-    setStock(undefined); setStockMsg(''); setStaleOk(false)
+    setStock(undefined); setStockMsg(''); setStaleOk(false); setUnknown([])
     if (!storeId) return
     let live = true
     fetchStock(storeId).then(d => { if (live) setStock(d) }).catch(e => { if (live) setStockMsg(errorText(e)) })
@@ -224,7 +227,7 @@ export default function OrderPage() {
   // Airレジの在庫 CSV を読み、設定在庫数より少ない商品に「設定在庫数 − 在庫数」の数量を入れる
   async function readStock(file: File | undefined) {
     if (!file) return
-    setStockMsg('')
+    setStockMsg(''); setUnknown([])
     if (!storeId) { setStockMsg('先に店舗を選んでください。在庫は店舗ごとに保存します。'); return }
     try {
       const raw = await readCsv(file)
@@ -236,22 +239,35 @@ export default function OrderPage() {
         return
       }
       // 先に品番（Airレジの商品ID）で結びつけ、見つからなければバーコードで探す
-      const byCode = new Map<string, Item>()
-      const byBarcode = new Map<string, Item>()
-      for (const i of items) {
-        if (i.code) byCode.set(i.code, i)
-        if (i.barcode) byBarcode.set(i.barcode, i)
+      // 「使わない」にした商品も結びつける（未登録と間違えないように。在庫も保存する）
+      const { data: all, error: e0 } = await supabase.from('items').select('id, code, barcode').range(0, 9999)
+      if (e0) throw e0
+      const byCode = new Map<string, string>()
+      const byBarcode = new Map<string, string>()
+      for (const i of (all ?? []) as Pick<Item, 'id' | 'code' | 'barcode'>[]) {
+        if (i.code) byCode.set(i.code, i.id)
+        if (i.barcode) byBarcode.set(i.barcode, i.id)
       }
       const qty: Record<string, number> = {}
+      const notFound: typeof unknown = []
       let miss = 0
       for (const r of raw) {
         // Airレジのバーコードは頭に # が付く
         const keys = idCols.map(c => (r[c] ?? '').replace(/^['#]/, '').trim()).filter(Boolean)
-        const item = keys.map(k => byCode.get(k)).find(Boolean) ?? keys.map(k => byBarcode.get(k)).find(Boolean)
+        const id = keys.map(k => byCode.get(k)).find(Boolean) ?? keys.map(k => byBarcode.get(k)).find(Boolean)
         const n = Number((r[qtyCol] ?? '').replace(/,/g, ''))
-        if (!item || !Number.isFinite(n)) { miss++; continue }
-        qty[item.id] = Math.round(n)
+        if (!id) {
+          miss++
+          if (keys.length) notFound.push({
+            id: (r['商品ID'] ?? '').trim(), name: (r['商品名'] ?? '').trim(), category: (r['カテゴリー'] ?? '').trim(),
+            barcode: (r['バーコード'] ?? r['JANコード'] ?? '').replace(/^['#]/, '').trim(), qty: (r[qtyCol] ?? '').trim(),
+          })
+          continue
+        }
+        if (!Number.isFinite(n)) { miss++; continue }
+        qty[id] = Math.round(n)
       }
+      setUnknown(notFound)
       // データベースに保存する（この店舗の前の在庫は置き換わる）
       const { error } = await supabase.rpc('import_stock', {
         p_store_id: storeId, p_file: file.name, p_miss: miss,
@@ -301,6 +317,14 @@ export default function OrderPage() {
     if (!stock) return
     const filled = fillFromStock(stock.qty)
     setStockMsg(filled ? `設定在庫数より少ない ${filled}品に「設定在庫数 − 在庫」の数量を入れました。数は直せます。` : '数量を入れる商品はありませんでした（設定在庫数が空か、在庫が足りているか、もう数量が入っています）。')
+  }
+
+  // 未登録の商品を、商品の CSV の形で書き出す（取引先・仕入れ価格などを書き足して「商品」画面で読み込む）
+  function exportUnknown() {
+    writeCsv(unknown.map(u => ({
+      取引先コード: '', 取引先名: '', '品番（Airレジ）': u.id, 品名: u.name, 規格: '', 単位: '個', 仕入れ価格: '', 販売価格: '', 税率: '',
+      バーコード: u.barcode, 発注ライン: 10, 設定在庫数: 18, 使う: '1', 備考: u.category ? `Airレジのカテゴリー：${u.category}` : '',
+    })), ITEM_HEADERS, '未登録の商品.csv')
   }
 
   const setQty = (id: string, v: number) => setCart(c => {
@@ -424,6 +448,22 @@ export default function OrderPage() {
           <span className="small"><span className="swatch stock-short" />発注ラインを下回った <span className="swatch stock-near" />発注ラインの120%未満</span>
         </div>}
         {stockMsg && <p className="note small">{stockMsg}</p>}
+        {unknown.length > 0 && (
+          <details className="unknown-items">
+            <summary><b>未登録の商品が {unknown.length}件</b> あります（在庫 CSV にあって、商品に登録していないもの）。在庫も数量も入りません。</summary>
+            <p className="small">「CSV で書き出す」で、商品の CSV の形で書き出せます。取引先コード・仕入れ価格・税率などを書き足して、「商品」画面の「CSV 読み込み」で登録してください。</p>
+            <div className="row">
+              <button className="btn small" onClick={exportUnknown}>CSV で書き出す（{unknown.length}件）</button>
+              <button className="btn small quiet" onClick={() => setUnknown([])}>閉じる</button>
+            </div>
+            <div className="tbl-wrap">
+              <table className="list">
+                <thead><tr><th>Airレジの商品ID</th><th>商品名</th><th>カテゴリー</th><th>バーコード</th><th className="num">在庫数</th></tr></thead>
+                <tbody>{unknown.map((u, n) => <tr key={n}><td><span className="chip">{u.id}</span></td><td>{u.name}</td><td className="sub">{u.category}</td><td className="sub">{u.barcode}</td><td className="num">{u.qty}</td></tr>)}</tbody>
+              </table>
+            </div>
+          </details>
+        )}
         <div className="tbl-wrap">
           <table className="list">
             <thead><tr><th aria-label="お気に入り" /><th>品番（Airレジ）</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">在庫</th><th className="num">発注ライン</th><th className="num">設定在庫数</th><th className="num">数量</th></tr></thead>

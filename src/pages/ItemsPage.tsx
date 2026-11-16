@@ -7,7 +7,8 @@ import { readCsv, writeCsv } from '../lib/csv'
 import MasterTable, { type Field } from '../components/MasterTable'
 import CsvImport from '../components/CsvImport'
 
-const HEADERS = ['取引先コード', '取引先名', '品番（Airレジ）', '品名', '規格', '単位', '仕入れ価格', '販売価格', '税率', 'バーコード', '発注ライン', '設定在庫数', '使う', '備考']
+/** 商品の CSV の列（発注画面の「未登録の商品」の書き出しでも使う） */
+export const HEADERS = ['取引先コード', '取引先名', '品番（Airレジ）', '品名', '規格', '単位', '仕入れ価格', '販売価格', '税率', 'バーコード', '発注ライン', '設定在庫数', '使う', '備考']
 
 /** 粗利率：販売価格（税込）から税を抜いた額に対する、仕入れ価格（税抜）との差 */
 function marginText(i: Pick<Item, 'price' | 'sale_price' | 'tax_rate'>) {
