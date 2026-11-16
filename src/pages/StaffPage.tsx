@@ -64,12 +64,12 @@ export default function StaffPage() {
   return (
     <section className="panel">
       <div className="panel-head"><h2>スタッフ</h2></div>
-      <div className="note">アカウントは管理者がここで作ります。ID とパスワードを決めて、本人に伝えてください。パスワードを忘れた人がいたら「パスワードを決め直す」で新しいパスワードにします。商品・取引先・店舗・設定を直せるのは管理者だけです。</div>
+      <div className="note">アカウントは管理者がここで作ります。ID（半角英数字か、本人のメールアドレス）とパスワードを決めて、本人に伝えてください。パスワードを忘れた人がいたら「パスワードを決め直す」で新しいパスワードにします。商品・取引先・店舗・設定を直せるのは管理者だけです。</div>
       {error && <p className="msg">{error}</p>}
 
       <form className="toolbar" onSubmit={create}>
-        <input aria-label="ID" placeholder="ID（半角英数字）" autoCapitalize="none" spellCheck={false} required
-          pattern="[A-Za-z0-9][A-Za-z0-9._\-]{2,31}" title="半角の英数字（と . _ -）で3〜32文字"
+        <input aria-label="ID" placeholder="ID（半角英数字かメールアドレス）" autoCapitalize="none" spellCheck={false} required
+          pattern="[A-Za-z0-9][A-Za-z0-9._\-]{2,31}|[^\s@]+@[^\s@]+\.[^\s@]+" title="メールアドレスか、半角の英数字（と . _ -）で3〜32文字"
           value={form.login_id} onChange={e => setForm({ ...form, login_id: e.target.value })} />
         <input aria-label="名前" placeholder="名前" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
         <input aria-label="パスワード" placeholder="パスワード（8文字以上）" minLength={8} required autoComplete="new-password"

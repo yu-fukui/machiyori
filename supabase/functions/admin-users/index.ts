@@ -1,6 +1,6 @@
 // スタッフのアカウントを管理者が作る・パスワードを決め直す（代表 2026-11-16）
 // 使う人が限られているので、自分での登録はやめ、管理者が ID とパスワードを決める。
-// ID はログインのとき「ID@machiyori.invalid」というメールアドレスに直して使う（メールは送らない）。
+// ID はメールアドレスでもよい。メールアドレスでない ID は「ID@machiyori.invalid」というメールアドレスに直して使う（どちらもメールは送らない）。
 // 呼べるのはログインした管理者だけ。秘密の値は Supabase が関数に自動で渡すもの（SUPABASE_SERVICE_ROLE_KEY）だけを使う。
 import { createClient } from 'npm:@supabase/supabase-js@2.95.3'
 
@@ -15,6 +15,7 @@ const json = (body: unknown, status = 200) =>
 /** 画面の src/lib/login.ts と同じ決まり */
 const LOGIN_DOMAIN = 'machiyori.invalid'
 const ID_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const ROLES = ['staff', 'admin', 'pending']
 
 Deno.serve(async req => {
@@ -38,11 +39,14 @@ Deno.serve(async req => {
     const id = String(body.login_id ?? '').trim().toLowerCase()
     const name = String(body.name ?? '').trim()
     const role = ROLES.includes(body.role) ? body.role : 'staff'
-    if (!ID_RE.test(id)) return json({ error: 'ID は半角の英小文字・数字（と . _ -）で3〜32文字にしてください' }, 400)
+    const isEmail = id.includes('@')
+    if (isEmail ? !EMAIL_RE.test(id) || id.length > 254 : !ID_RE.test(id)) {
+      return json({ error: 'ID は、メールアドレスか、半角の英小文字・数字（と . _ -）で3〜32文字にしてください' }, 400)
+    }
     if (!name) return json({ error: '名前を入れてください' }, 400)
 
     const { data, error } = await admin.auth.admin.createUser({
-      email: `${id}@${LOGIN_DOMAIN}`, password, email_confirm: true, user_metadata: { name, login_id: id },
+      email: isEmail ? id : `${id}@${LOGIN_DOMAIN}`, password, email_confirm: true, user_metadata: { name, login_id: id },
     })
     if (error || !data.user) {
       const t = error?.message ?? ''
