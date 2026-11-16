@@ -34,8 +34,8 @@ export interface OrderForm {
   remarks: string
 }
 
-type SortKey = 'times' | 'code' | 'name'
-const SORT_LABEL: Record<SortKey, string> = { times: '発注の多い順', code: '品番', name: '品名' }
+type SortKey = 'times' | 'short' | 'code' | 'name'
+const SORT_LABEL: Record<SortKey, string> = { times: '発注の多い順', short: '在庫の足りない順', code: '品番', name: '品名' }
 
 function loadCart(): Record<string, number> {
   try { return JSON.parse(readLocal(CART_KEY) || '{}') } catch { return {} }
@@ -138,6 +138,12 @@ export default function OrderPage() {
         const d = ((sa?.times ?? 0) - (sb?.times ?? 0)) || ((sa?.qty ?? 0) - (sb?.qty ?? 0))
         return d ? d * dir : byCode(a, b)
       }
+      if (sort.key === 'short') {
+        // 足りない数（最低在庫数 − 在庫数）で並べる。在庫か最低在庫数がない商品は、いつもいちばん後ろ
+        const sa = shortBy(a), sb = shortBy(b)
+        if (sa === null || sb === null) return sa === sb ? byCode(a, b) : sa === null ? 1 : -1
+        return (sa - sb) * dir || byCode(a, b)
+      }
       if (sort.key === 'name') return a.name.localeCompare(b.name, 'ja') * dir
       return byCode(a, b) * dir
     })
@@ -149,6 +155,11 @@ export default function OrderPage() {
     return Object.entries(g).sort((a, b) => (supName[a[0]] ?? '').localeCompare(supName[b[0]] ?? '', 'ja'))
   }, [items, cart, supName])
 
+  // 足りない数（最低在庫数 − 在庫数）。在庫か最低在庫数がなければ null
+  function shortBy(i: Item) {
+    const n = stock?.qty[i.id]
+    return i.min_stock == null || n === undefined ? null : i.min_stock - n
+  }
   // 在庫が最低在庫数より少ない商品
   function isShort(i: Item) {
     const n = stock?.qty[i.id]
@@ -194,6 +205,7 @@ export default function OrderPage() {
       })
       setStockMsg(`${Object.keys(qty).length}品の在庫を読み込みました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。最低在庫数を下回った ${short.length}品に発注数を入れました。数は直せます。`)
       if (short.length) setOnlyShort(true)
+      setSort({ key: 'short', desc: true })
     } catch (e) { setStockMsg(errorText(e)) }
   }
 
