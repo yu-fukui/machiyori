@@ -6,3 +6,7 @@ verify_jwt = false
 [functions.save-to-drive]
 # send-order と同じく、関数の中でログインとスタッフの権限を確かめる
 verify_jwt = false
+
+[functions.admin-users]
+# 関数の中でログインと管理者の権限を確かめる
+verify_jwt = false

@@ -77,8 +77,8 @@ export default function App() {
   if (!profile) return <main className="center muted">読み込み中…</main>
   if (profile.role === 'pending') {
     return <main className="center"><div className="panel narrow">
-      <h1>承認を待っています</h1>
-      <p>{profile.email} で登録しました。管理者が「スタッフ」画面で承認すると使えるようになります。</p>
+      <h1>このアカウントはいま使えません</h1>
+      <p>管理者に「スタッフ」画面で権限を「スタッフ」にしてもらうと使えるようになります。</p>
       <div className="row">
         <button className="btn" onClick={reload}>もう一度確かめる</button>
         <button className="btn" onClick={() => supabase.auth.signOut()}>ログアウト</button>

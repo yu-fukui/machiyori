@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { errorText } from '../lib/format'
+import { toLoginEmail } from '../lib/login'
 
+// アカウントは管理者が「スタッフ」の画面で作る。自分での登録はしない
 export default function LoginPage() {
-  const [mode, setMode] = useState<'login' | 'signup'>('login')
-  const [email, setEmail] = useState('')
+  const [loginId, setLoginId] = useState('')
   const [password, setPassword] = useState('')
-  const [name, setName] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -14,17 +14,11 @@ export default function LoginPage() {
     e.preventDefault()
     setBusy(true); setMsg('')
     try {
-      if (mode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
-      } else {
-        const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { name } } })
-        if (error) throw error
-        if (!data.session) setMsg('確認のメールを送りました。メールのリンクを開いてから、ログインしてください。')
-      }
+      const { error } = await supabase.auth.signInWithPassword({ email: toLoginEmail(loginId), password })
+      if (error) throw error
     } catch (err) {
       const t = errorText(err)
-      setMsg(t.includes('Invalid login') ? 'メールアドレスかパスワードが違います。' : t)
+      setMsg(t.includes('Invalid login') ? 'ID かパスワードが違います。' : t)
     } finally { setBusy(false) }
   }
 
@@ -32,22 +26,16 @@ export default function LoginPage() {
     <main className="center">
       <form className="panel narrow" onSubmit={submit}>
         <h1>まちより 発注</h1>
-        <p className="muted">{mode === 'login' ? 'スタッフのアカウントでログインしてください。' : '登録したあと、管理者の承認で使えるようになります。'}</p>
-        {mode === 'signup' && (
-          <div className="field"><label htmlFor="name">名前</label>
-            <input id="name" value={name} onChange={e => setName(e.target.value)} required /></div>
-        )}
-        <div className="field"><label htmlFor="email">メールアドレス</label>
-          <input id="email" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required /></div>
-        <div className="field"><label htmlFor="password">パスワード{mode === 'signup' && '（8文字以上）'}</label>
-          <input id="password" type="password" minLength={mode === 'signup' ? 8 : undefined}
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+        <p className="muted">管理者から受け取った ID とパスワードでログインしてください。</p>
+        <div className="field"><label htmlFor="login-id">ID（またはメールアドレス）</label>
+          <input id="login-id" autoComplete="username" autoCapitalize="none" spellCheck={false}
+            value={loginId} onChange={e => setLoginId(e.target.value)} required /></div>
+        <div className="field"><label htmlFor="password">パスワード</label>
+          <input id="password" type="password" autoComplete="current-password"
             value={password} onChange={e => setPassword(e.target.value)} required /></div>
         {msg && <p className="msg">{msg}</p>}
-        <button className="btn primary wide" disabled={busy}>{mode === 'login' ? 'ログイン' : '登録する'}</button>
-        <button type="button" className="link" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMsg('') }}>
-          {mode === 'login' ? 'はじめての方はこちらから登録' : 'ログインに戻る'}
-        </button>
+        <button className="btn primary wide" disabled={busy}>ログイン</button>
+        <p className="muted small">パスワードを忘れたときは、管理者に新しいパスワードを決めてもらってください。</p>
       </form>
     </main>
   )
