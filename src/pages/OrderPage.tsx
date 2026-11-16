@@ -11,8 +11,6 @@ const SORT_KEY = 'machiyori.sort'
 
 /** Airレジの在庫 CSV の列の名前（どれか1つあればよい） */
 const STOCK_ID_COLS = ['商品ID', '商品コード', '品番', 'バーコード', 'JANコード', 'JAN']
-/** 足りない数と最低発注数の大きいほうを発注数にする */
-const orderQty = (i: Item, short: number) => Math.max(i.min_order_qty || 1, short)
 const STOCK_QTY_COLS = ['在庫数', '現在庫数', '現在在庫数', '在庫数量', '在庫']
 interface StockData { storeId: string; at: string; file: string; qty: Record<string, number> }   // qty：商品の id → 在庫数
 /** データベースから、その店舗のいちばん新しい在庫を読む（読み込んだことがなければ null） */
@@ -161,7 +159,7 @@ export default function OrderPage() {
         return d ? d * dir : byCode(a, b)
       }
       if (sort.key === 'short') {
-        // 足りない数（最低在庫数 − 在庫数）で並べる。在庫か最低在庫数がない商品は、いつもいちばん後ろ
+        // 足りない数（発注ライン − 在庫数）で並べる。在庫か発注ラインがない商品は、いつもいちばん後ろ
         const sa = shortBy(a), sb = shortBy(b)
         if (sa === null || sb === null) return sa === sb ? byCode(a, b) : sa === null ? 1 : -1
         return (sa - sb) * dir || byCode(a, b)
@@ -177,18 +175,26 @@ export default function OrderPage() {
     return Object.entries(g).sort((a, b) => (supName[a[0]] ?? '').localeCompare(supName[b[0]] ?? '', 'ja'))
   }, [items, cart, supName])
 
-  // 足りない数（最低在庫数 − 在庫数）。在庫か最低在庫数がなければ null
+  // 足りない数（発注ライン − 在庫数）。在庫か発注ラインがなければ null
   function shortBy(i: Item) {
     const n = stock?.qty[i.id]
     return i.min_stock == null || n === undefined ? null : i.min_stock - n
   }
-  // 在庫が最低在庫数より少ない商品
+  // 行の色：在庫が発注ラインを下回ったら赤、発注ラインの 120% を切ったら黄
+  function stockLevel(i: Item): 'short' | 'near' | null {
+    const n = stock?.qty[i.id]
+    if (i.min_stock == null || n === undefined) return null
+    if (n < i.min_stock) return 'short'
+    if (n < i.min_stock * 1.2) return 'near'
+    return null
+  }
+  // 在庫が発注ラインより少ない商品
   function isShort(i: Item) {
     const n = stock?.qty[i.id]
     return i.min_stock != null && n !== undefined && n < i.min_stock
   }
 
-  // Airレジの在庫 CSV を読み、最低在庫数を下回った商品に「最低在庫数 − 在庫数」（最低発注数より少なければ最低発注数）の発注数を入れる
+  // Airレジの在庫 CSV を読み、発注ラインを下回った商品に「発注ライン − 在庫数」の発注数を入れる
   async function readStock(file: File | undefined) {
     if (!file) return
     setStockMsg('')
@@ -228,10 +234,10 @@ export default function OrderPage() {
       const short = items.filter(i => i.min_stock != null && qty[i.id] !== undefined && qty[i.id] < i.min_stock)
       setCart(c => {
         const n = { ...c }
-        for (const i of short) n[i.id] = orderQty(i, i.min_stock! - qty[i.id])
+        for (const i of short) n[i.id] = Math.max(1, i.min_stock! - qty[i.id])
         return n
       })
-      setStockMsg(`${Object.keys(qty).length}品の在庫を読み込んで保存しました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。最低在庫数を下回った ${short.length}品に発注数を入れました。数は直せます。`)
+      setStockMsg(`${Object.keys(qty).length}品の在庫を読み込んで保存しました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。発注ラインを下回った ${short.length}品に発注数を入れました。数は直せます。`)
       if (short.length) setOnlyShort(true)
       setSort({ key: 'short', desc: true })
     } catch (e) { setStockMsg(errorText(e)) }
@@ -308,16 +314,17 @@ export default function OrderPage() {
         </div>
         <div className="toolbar">
           <label className="btn">在庫 CSV を読み込んで保存する（Airレジ）<input type="file" accept=".csv,text/csv" hidden onChange={e => { readStock(e.target.files?.[0]); e.target.value = '' }} /></label>
-          {stock && <label className="check"><input type="checkbox" checked={onlyShort} onChange={e => setOnlyShort(e.target.checked)} />在庫が最低在庫数より少ないものだけ</label>}
+          {stock && <label className="check"><input type="checkbox" checked={onlyShort} onChange={e => setOnlyShort(e.target.checked)} />在庫が発注ラインより少ないものだけ</label>}
+          {stock && <span className="small"><span className="swatch stock-short" />発注ラインを下回った <span className="swatch stock-near" />発注ラインの120%未満</span>}
           {stock && <span className="muted small">在庫：{stores.find(s => s.id === stock.storeId)?.name}・{stock.file}（{jpDateTime(stock.at)} に読み込み。みんなで同じ在庫を見ます）</span>}
         </div>
         {stockMsg && <p className="note small">{stockMsg}</p>}
         <div className="tbl-wrap">
           <table className="list">
-            <thead><tr><th aria-label="お気に入り" /><th>品番</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">発注</th><th className="num">在庫／最低</th><th className="num">数量</th></tr></thead>
+            <thead><tr><th aria-label="お気に入り" /><th>品番</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">発注</th><th className="num">在庫</th><th className="num">発注ライン</th><th className="num">数量</th></tr></thead>
             <tbody>
               {rows.map(i => (
-                <tr key={i.id} className={cart[i.id] ? 'picked' : undefined}>
+                <tr key={i.id} className={[cart[i.id] ? 'picked' : '', stockLevel(i) ? `stock-${stockLevel(i)}` : ''].join(' ').trim() || undefined}>
                   <td><button className={favs.has(i.id) ? 'star on' : 'star'} aria-pressed={favs.has(i.id)}
                     aria-label={favs.has(i.id) ? `${i.name}をお気に入りから外す` : `${i.name}をお気に入りにする`}
                     onClick={() => toggleFav(i.id)}>{favs.has(i.id) ? '★' : '☆'}</button></td>
@@ -326,19 +333,19 @@ export default function OrderPage() {
                   <td className="sub">{supName[i.supplier_id]}</td>
                   <td className="num">{yen(i.price)}</td>
                   <td className="num sub">{stats[i.id] ? `${stats[i.id].times}回` : '—'}</td>
-                  <td className={isShort(i) ? 'num warn' : 'num sub'}>{stock?.qty[i.id] ?? '—'}／{i.min_stock ?? '—'}</td>
+                  <td className="num">{stock?.qty[i.id] ?? '—'}</td>
+                  <td className="num sub">{i.min_stock ?? '—'}</td>
                   <td className="num">
                     <span className="qty">
                       <button className="btn small" aria-label={`${i.name}を減らす`} onClick={() => setQty(i.id, (cart[i.id] || 0) - 1)}>−</button>
                       <input type="number" min={0} inputMode="numeric" aria-label={`${i.name}の数量`} placeholder="0"
                         value={cart[i.id] || ''} onChange={e => setQty(i.id, +e.target.value)} />
-                      <button className="btn small" aria-label={`${i.name}を増やす`} onClick={() => setQty(i.id, cart[i.id] ? cart[i.id] + 1 : i.min_order_qty || 1)}>＋</button>
+                      <button className="btn small" aria-label={`${i.name}を増やす`} onClick={() => setQty(i.id, (cart[i.id] || 0) + 1)}>＋</button>
                     </span>
-                    <div className={cart[i.id] && cart[i.id] < i.min_order_qty ? 'sub warn' : 'sub'}>最低 {i.min_order_qty}</div>
                   </td>
                 </tr>
               ))}
-              {!loading && rows.length === 0 && <tr><td colSpan={8} className="muted">
+              {!loading && rows.length === 0 && <tr><td colSpan={9} className="muted">
                 {items.length === 0 ? '商品がまだありません。「商品」画面で登録するか、CSV で読み込んでください。'
                   : onlyFav && favs.size === 0 ? 'お気に入りはまだありません。商品の ☆ を押すと登録できます。' : '該当する商品がありません。'}
               </td></tr>}

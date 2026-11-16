@@ -1,7 +1,7 @@
 /* レイアウト：上にナビ、発注画面は左に商品・右に発注かご。発注書は常に白い A4 の紙 */
 :root {
   --bg: #f3f5f4; --panel: #ffffff; --fg: #1d2422; --muted: #5d6a66; --line: #d5dcd9;
-  --accent: #1f6f5c; --accent-fg: #ffffff; --warn: #a4501b; --danger: #b3261e; --chip: #e4eeea; --picked: #eef6f3;
+  --accent: #1f6f5c; --accent-fg: #ffffff; --warn: #a4501b; --danger: #b3261e; --chip: #e4eeea; --picked: #eef6f3; --row-short: #fbe1df; --row-near: #fdf3c8;
   --ok: #1f6f5c; --draft: #8a5a00;
   --ui: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
   --paper: "BIZ UDPMincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
@@ -10,7 +10,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #141917; --panel: #1c2321; --fg: #e4ebe8; --muted: #9aa8a3; --line: #33403c;
-    --accent: #4fb196; --accent-fg: #0d1513; --warn: #e08a52; --danger: #f2867e; --chip: #24312d; --picked: #1f2c28;
+    --accent: #4fb196; --accent-fg: #0d1513; --warn: #e08a52; --danger: #f2867e; --chip: #24312d; --picked: #1f2c28; --row-short: #4a2422; --row-near: #47401c;
     --ok: #4fb196; --draft: #e0b04f;
     color-scheme: dark;
   }
@@ -83,6 +83,12 @@ table.list { width: 100%; border-collapse: collapse; font-variant-numeric: tabul
 table.list th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 400; border-bottom: 1px solid var(--line); padding: 6px 8px; white-space: nowrap; }
 table.list td { border-bottom: 1px solid var(--line); padding: 6px 8px; vertical-align: middle; }
 table.list tr.picked td { background: var(--picked); }
+/* 発注画面：在庫が発注ラインを下回ったら赤、120% 未満なら黄（選んだ行でも在庫の色を出す） */
+table.list tr.stock-short td { background: var(--row-short); }
+table.list tr.stock-near td { background: var(--row-near); }
+.swatch { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--line); border-radius: 2px; vertical-align: -1px; margin: 0 4px 0 8px; }
+.swatch.stock-short { background: var(--row-short); }
+.swatch.stock-near { background: var(--row-near); }
 table.list tr.clickable { cursor: pointer; }
 table.list tr.clickable:hover td { background: var(--picked); }
 td.num, th.num { text-align: right; white-space: nowrap; }
