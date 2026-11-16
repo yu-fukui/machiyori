@@ -36,6 +36,7 @@ export interface Supplier {
   tel: string
   send_method: 'fax' | 'email'
   deal_type: '' | 'buy' | 'consign' | 'both'   // 買取・委託
+  no_order: boolean         // 発注しない取引先（100番台の生産者さんなど）。発注画面に出さず、在庫 CSV で数量も入れない
   note: string
   active: boolean
 }

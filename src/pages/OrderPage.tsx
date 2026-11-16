@@ -167,6 +167,7 @@ export default function OrderPage() {
   const rows = useMemo(() => {
     const k = q.trim().toLowerCase()
     const list = items.filter(i =>
+      !supById[i.supplier_id]?.no_order &&   // 発注しない取引先の商品は出さない
       (!sup || i.supplier_id === sup) &&
       (!onlyCart || cart[i.id] > 0) &&
       (!onlyFav || favs.has(i.id)) &&
@@ -270,6 +271,7 @@ export default function OrderPage() {
     for (const i of items) {
       const n = qty[i.id]
       if (i.min_stock == null || n === undefined || n >= i.min_stock || (cart[i.id] && !isAuto(i.id))) continue
+      if (supById[i.supplier_id]?.no_order) continue   // 発注しない取引先（100番台の生産者さんなど）
       add[i.id] = Math.max(1, i.min_stock - n)
     }
     setCart(c => {
@@ -379,13 +381,13 @@ export default function OrderPage() {
       <section className="panel">
         <div className="panel-head">
           <h2>商品を選ぶ</h2>
-          <span className="muted small">{loading ? '読み込み中…' : `${rows.length} / ${items.length} 品`}</span>
+          <span className="muted small">{loading ? '読み込み中…' : `${rows.length} / ${items.filter(i => !supById[i.supplier_id]?.no_order).length} 品`}</span>
         </div>
         <div className="toolbar">
           <input type="search" aria-label="品名・品番・取引先で探す" placeholder="品名・品番・取引先で探す" value={q} onChange={e => setQ(e.target.value)} className="grow" />
           <select aria-label="取引先" value={sup} onChange={e => setSup(e.target.value)}>
             <option value="">すべての取引先</option>
-            {suppliers.filter(s => s.active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {suppliers.filter(s => s.active && !s.no_order).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
         <div className="toolbar">
