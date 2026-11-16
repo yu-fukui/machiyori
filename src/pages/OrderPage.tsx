@@ -12,6 +12,8 @@ const STOCK_KEY = 'machiyori.stock'
 
 /** Airレジの在庫 CSV の列の名前（どれか1つあればよい） */
 const STOCK_ID_COLS = ['商品ID', '商品コード', '品番', 'バーコード', 'JANコード', 'JAN']
+/** 足りない数と最低発注数の大きいほうを発注数にする */
+const orderQty = (i: Item, short: number) => Math.max(i.min_order_qty || 1, short)
 const STOCK_QTY_COLS = ['在庫数', '現在庫数', '現在在庫数', '在庫数量', '在庫']
 interface StockData { at: string; file: string; qty: Record<string, number> }   // qty：商品の id → 在庫数
 function loadStock(): StockData | null {
@@ -153,7 +155,7 @@ export default function OrderPage() {
     return i.min_stock != null && n !== undefined && n < i.min_stock
   }
 
-  // Airレジの在庫 CSV を読み、最低在庫数を下回った商品に「最低在庫数 − 在庫数」の発注数を入れる
+  // Airレジの在庫 CSV を読み、最低在庫数を下回った商品に「最低在庫数 − 在庫数」（最低発注数より少なければ最低発注数）の発注数を入れる
   async function readStock(file: File | undefined) {
     if (!file) return
     setStockMsg('')
@@ -166,15 +168,18 @@ export default function OrderPage() {
         setStockMsg(`在庫 CSV の列が見つかりません。「${STOCK_ID_COLS.join('・')}」のどれかと「${STOCK_QTY_COLS.join('・')}」のどれかの列が要ります。（この CSV の列：${head.join('、') || 'なし'}）`)
         return
       }
+      // 先に品番（Airレジ）で結びつけ、見つからなければ品番で探す
+      const byAir = new Map<string, Item>()
       const byCode = new Map<string, Item>()
       for (const i of items) {
+        if (i.airregi_code) byAir.set(i.airregi_code, i)
         if (i.code) byCode.set(i.code, i)
-        if (i.barcode) byCode.set(i.barcode, i)
       }
       const qty: Record<string, number> = {}
       let miss = 0
       for (const r of raw) {
-        const item = idCols.map(c => byCode.get((r[c] ?? '').replace(/^'/, ''))).find(Boolean)
+        const keys = idCols.map(c => (r[c] ?? '').replace(/^'/, '').trim()).filter(Boolean)
+        const item = keys.map(k => byAir.get(k)).find(Boolean) ?? keys.map(k => byCode.get(k)).find(Boolean)
         const n = Number((r[qtyCol] ?? '').replace(/,/g, ''))
         if (!item || !Number.isFinite(n)) { miss++; continue }
         qty[item.id] = n
@@ -184,7 +189,7 @@ export default function OrderPage() {
       const short = items.filter(i => i.min_stock != null && qty[i.id] !== undefined && qty[i.id] < i.min_stock)
       setCart(c => {
         const n = { ...c }
-        for (const i of short) n[i.id] = Math.max(1, i.min_stock! - qty[i.id])
+        for (const i of short) n[i.id] = orderQty(i, i.min_stock! - qty[i.id])
         return n
       })
       setStockMsg(`${Object.keys(qty).length}品の在庫を読み込みました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。最低在庫数を下回った ${short.length}品に発注数を入れました。数は直せます。`)
@@ -287,8 +292,9 @@ export default function OrderPage() {
                       <button className="btn small" aria-label={`${i.name}を減らす`} onClick={() => setQty(i.id, (cart[i.id] || 0) - 1)}>−</button>
                       <input type="number" min={0} inputMode="numeric" aria-label={`${i.name}の数量`} placeholder="0"
                         value={cart[i.id] || ''} onChange={e => setQty(i.id, +e.target.value)} />
-                      <button className="btn small" aria-label={`${i.name}を増やす`} onClick={() => setQty(i.id, (cart[i.id] || 0) + 1)}>＋</button>
+                      <button className="btn small" aria-label={`${i.name}を増やす`} onClick={() => setQty(i.id, cart[i.id] ? cart[i.id] + 1 : i.min_order_qty || 1)}>＋</button>
                     </span>
+                    <div className={cart[i.id] && cart[i.id] < i.min_order_qty ? 'sub warn' : 'sub'}>最低 {i.min_order_qty}</div>
                   </td>
                 </tr>
               ))}

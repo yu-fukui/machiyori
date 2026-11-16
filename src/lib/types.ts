@@ -50,8 +50,9 @@ export interface Item {
   price: number              // 仕入れ価格（税抜）。発注書にはこれを載せる
   sale_price: number | null  // 販売価格（税込）
   tax_rate: 8 | 10
-  barcode: string
+  airregi_code: string      // 品番（Airレジ）。Airレジの商品ID。在庫 CSV と結びつける
   min_stock: number | null   // 最低在庫数。空なら在庫 CSV で自動の発注数を入れない
+  min_order_qty: number      // 最低発注数（1以上）
   active: boolean
 }
 
