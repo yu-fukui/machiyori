@@ -25,7 +25,7 @@ const jpDate = (s: string | null) => {
   return `${y}年${+m}月${+d}日`
 }
 
-// 納品先と日時（発注書の「納品希望日時」「納品先」と同じ書き方）
+// 納品先と日時（発注書の「希望納期」「納品先」と同じ書き方）
 function deliveryText(order: Record<string, any>, store: Record<string, any>) {
   const d = order.delivery_snapshot
   const pickup = order.delivery_type === 'pickup'
@@ -35,7 +35,7 @@ function deliveryText(order: Record<string, any>, store: Record<string, any>) {
   else if (pickup) where = '集荷（貴社へ引き取りに伺います）'
   else where = [d.name, [d.zip && `〒${d.zip}`, d.address].filter(Boolean).join(' '), d.tel && `TEL ${d.tel}`].filter(Boolean).join('　')
   return [
-    `${pickup ? '集荷日時' : '納品希望日時'}：${when}`,
+    `${pickup ? '集荷日時' : '希望納期'}：${when}`,
     `${pickup ? '受け渡し' : '納品先'}：${where}`,
     ...(d?.note ? [`　${d.note}`] : []),
   ]

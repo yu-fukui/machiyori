@@ -140,7 +140,8 @@ fieldset.field legend { font-size: 12px; color: var(--muted); padding: 0; margin
 .sheet-fax { border: 2px solid #111; padding: 2mm 4mm; margin: -4mm 0 5mm; font-size: 10pt; display: grid; gap: 0.5mm; }
 .sheet-fax span { display: inline-block; width: 24mm; color: #444; font-size: 9pt; }
 .sheet-fax b { font-size: 13pt; letter-spacing: .05em; }
-.sheet-meta { display: flex; justify-content: flex-end; gap: 6mm; font-size: 9.5pt; margin-bottom: 4mm; }
+.sheet-meta { display: flex; flex-direction: column; align-items: flex-end; gap: .5mm; font-size: 10.5pt; margin-bottom: 4mm; }
+.sheet-meta .sub { font-size: 8.5pt; color: #555; }
 .sheet-title { text-align: center; font-size: 22pt; letter-spacing: .6em; padding-left: .6em; margin: 0 0 6mm; font-weight: 700; }
 .sheet-parties { display: flex; justify-content: space-between; gap: 8mm; margin-bottom: 6mm; }
 .sheet-to { flex: 1; }
@@ -160,10 +161,12 @@ fieldset.field legend { font-size: 12px; color: var(--muted); padding: 0; margin
 .sheet td { border: 1px solid #111; padding: 1.2mm 2mm; height: 7mm; }
 .sheet td.r { text-align: right; }
 .sheet td.c { text-align: center; }
-.sheet .sheet-totals { width: 70mm; margin: 3mm 0 0 auto; }
+.sheet-bottom { display: flex; gap: 0; margin-top: 3mm; align-items: stretch; }
+.sheet .sheet-totals { width: 70mm; flex: none; }
+.sheet-code { margin-right: 2mm; color: #333; }
 .sheet-totals td:first-child { background: #eee; }
 .sheet-note { font-size: 8.5pt; margin-top: 1mm; }
-.sheet-remarks { border: 1px solid #111; min-height: 20mm; padding: 2mm 3mm; margin-top: 5mm; font-size: 9.5pt; white-space: pre-wrap; }
+.sheet-remarks { flex: 1; border: 1px solid #111; border-right: 0; min-height: 20mm; padding: 2mm 3mm; font-size: 9.5pt; white-space: pre-wrap; }
 .sheet-remarks span { display: block; color: #555; font-size: 8.5pt; }
 
 @media print {

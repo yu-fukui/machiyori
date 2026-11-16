@@ -32,7 +32,10 @@ export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [stores, setStores] = useState<Store[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [settings, setSettings] = useState<Settings>({ fax_gateway: '', tax_round: 'floor', reply_to: '', drive_folder_id: '' })
+  const [settings, setSettings] = useState<Settings>({
+    fax_gateway: '', tax_round: 'floor', reply_to: '', drive_folder_id: '',
+    company_name: '', company_zip: '', company_address: '', company_tel: '', company_fax: '', company_person: '', payment_terms: '',
+  })
   const [toastMsg, setToastMsg] = useState('')
   const route = useRoute()
 

@@ -82,6 +82,14 @@ export interface Settings {
   tax_round: 'floor' | 'round' | 'ceil'
   reply_to: string
   drive_folder_id: string
+  // 発注書の発注元（会社）と支払条件
+  company_name: string
+  company_zip: string
+  company_address: string
+  company_tel: string
+  company_fax: string
+  company_person: string
+  payment_terms: string
 }
 
 export interface OrderLine {

@@ -9,6 +9,14 @@ export function jpDate(s: string | null | undefined) {
   return `${y}年${+m}月${+d}日`
 }
 
+/** 発注書の日付：令和8年1月29日 */
+export function eraDate(s: string | null | undefined) {
+  if (!s) return ''
+  const [y, m, d] = s.slice(0, 10).split('-').map(Number)
+  return new Intl.DateTimeFormat('ja-JP-u-ca-japanese', { era: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' })
+    .format(new Date(Date.UTC(y, m - 1, d)))
+}
+
 export function jpDateTime(s: string | null | undefined) {
   if (!s) return ''
   return new Date(s).toLocaleString('ja-JP', {
@@ -59,15 +67,16 @@ export function deliveryLines(o: Pick<Order, 'delivery_type' | 'delivery_time' |
   const when = [o.due_date ? jpDate(o.due_date) : '', o.delivery_time].filter(Boolean).join(' ') || 'ご相談'
   let where: string
   if (!d) {
-    const st = o.store_snapshot as { name: string; delivery_note?: string }
-    where = st.delivery_note || `${st.name}（上記住所）`
+    // 納品先を選ばなかった発注書は店舗へ（発注元は会社なので、店舗の住所も載せる）
+    const st = o.store_snapshot as { name: string; delivery_note?: string; zip?: string; address?: string }
+    where = st.delivery_note || [st.name, [st.zip && `〒${st.zip}`, st.address].filter(Boolean).join(' ')].filter(Boolean).join('　')
   } else if (pickup) {
     where = '集荷（貴社へ引き取りに伺います）'
   } else {
     where = [d.name, [d.zip && `〒${d.zip}`, d.address].filter(Boolean).join(' '), d.tel && `TEL ${d.tel}`].filter(Boolean).join('　')
   }
   return {
-    whenLabel: pickup ? '集荷日時' : '納品希望日時',
+    whenLabel: pickup ? '集荷日時' : '希望納期',
     when,
     whereLabel: pickup ? '受け渡し' : '納品先',
     where,

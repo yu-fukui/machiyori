@@ -32,6 +32,23 @@ export default function SettingsPage() {
     <form className="panel narrow-wide" onSubmit={save}>
       <h2>設定</h2>
 
+      <h3>発注書</h3>
+      <div className="note">発注書の右上に「発注元」として載せる会社の情報と、支払条件です。店舗は「販売場所」として載ります。ご担当者は、店舗に担当者があればそちらを載せます。</div>
+      <div className="field"><label htmlFor="cname">会社名</label>
+        <input id="cname" value={v.company_name} onChange={e => setV({ ...v, company_name: e.target.value })} /></div>
+      <div className="field"><label htmlFor="czip">郵便番号</label>
+        <input id="czip" value={v.company_zip} placeholder="例 910-0000" onChange={e => setV({ ...v, company_zip: e.target.value })} /></div>
+      <div className="field"><label htmlFor="caddr">住所</label>
+        <input id="caddr" value={v.company_address} onChange={e => setV({ ...v, company_address: e.target.value })} /></div>
+      <div className="field"><label htmlFor="ctel">電話</label>
+        <input id="ctel" value={v.company_tel} onChange={e => setV({ ...v, company_tel: e.target.value })} /></div>
+      <div className="field"><label htmlFor="cfax">FAX</label>
+        <input id="cfax" value={v.company_fax} placeholder="空なら載せません" onChange={e => setV({ ...v, company_fax: e.target.value })} /></div>
+      <div className="field"><label htmlFor="cperson">ご担当者</label>
+        <input id="cperson" value={v.company_person} onChange={e => setV({ ...v, company_person: e.target.value })} /></div>
+      <div className="field"><label htmlFor="terms">支払条件</label>
+        <input id="terms" value={v.payment_terms} placeholder="例 月末締翌月末振込" onChange={e => setV({ ...v, payment_terms: e.target.value })} /></div>
+
       <h3>インターネットFAX（メールtoFAX）</h3>
       <div className="note">
         契約したサービスが決めている「FAX を送るときのメールの宛先」の形を入れます。<code>{'{fax}'}</code> のところに取引先の FAX 番号（数字だけ）が入ります。

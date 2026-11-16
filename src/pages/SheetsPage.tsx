@@ -404,7 +404,7 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint, regis
         )}
         {error && <p className="msg">{error}</p>}
       </div>
-      <div className="sheet-scroll"><OrderSheet ref={ref} order={o} fax={faxPrinting ? sup.fax : undefined} /></div>
+      <div className="sheet-scroll"><OrderSheet ref={ref} order={o} settings={settings} fax={faxPrinting ? sup.fax : undefined} /></div>
     </section>
   )
 }
