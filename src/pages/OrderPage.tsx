@@ -2,11 +2,21 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { go, useApp } from '../lib/app'
 import type { DeliveryPlace, DeliveryType, Item } from '../lib/types'
-import { deliveryLabel, errorText, kindLabel, methodLabel, periodText, readLocal, todayJst, writeLocal, yen } from '../lib/format'
+import { deliveryLabel, errorText, jpDateTime, kindLabel, methodLabel, periodText, readLocal, todayJst, writeLocal, yen } from '../lib/format'
+import { readCsv } from '../lib/csv'
 
 const CART_KEY = 'machiyori.cart'
 const STORE_KEY = 'machiyori.store'
 const SORT_KEY = 'machiyori.sort'
+const STOCK_KEY = 'machiyori.stock'
+
+/** Airレジの在庫 CSV の列の名前（どれか1つあればよい） */
+const STOCK_ID_COLS = ['商品ID', '商品コード', '品番', 'バーコード', 'JANコード', 'JAN']
+const STOCK_QTY_COLS = ['在庫数', '現在庫数', '現在在庫数', '在庫数量', '在庫']
+interface StockData { at: string; file: string; qty: Record<string, number> }   // qty：商品の id → 在庫数
+function loadStock(): StockData | null {
+  try { return JSON.parse(readLocal(STOCK_KEY) || 'null') } catch { return null }
+}
 /** 発注書を作ったときの入力の控え。発注書の画面で「保存しない」を選んだら、これを発注画面に戻す */
 export const LAST_KEY = 'machiyori.last'
 /** 発注画面に戻す入力（発注書の画面が書き、発注画面が一度だけ読む） */
@@ -57,6 +67,9 @@ export default function OrderPage() {
   const [sup, setSup] = useState('')
   const [onlyCart, setOnlyCart] = useState(false)
   const [onlyFav, setOnlyFav] = useState(false)
+  const [onlyShort, setOnlyShort] = useState(false)
+  const [stock, setStock] = useState<StockData | null>(loadStock)
+  const [stockMsg, setStockMsg] = useState('')
   const [sort, setSort] = useState(loadSort)
   const [cart, setCart] = useState<Record<string, number>>(() => restored?.cart ?? loadCart())
   const [delivery, setDelivery] = useState<{ type: DeliveryType; storeId: string; placeId: string }>(restored?.delivery ?? { type: 'store', storeId: '', placeId: '' })
@@ -113,6 +126,7 @@ export default function OrderPage() {
       (!sup || i.supplier_id === sup) &&
       (!onlyCart || cart[i.id] > 0) &&
       (!onlyFav || favs.has(i.id)) &&
+      (!onlyShort || isShort(i)) &&
       (!k || `${i.code ?? ''} ${i.name} ${i.spec} ${supName[i.supplier_id] ?? ''}`.toLowerCase().includes(k)))
     const dir = sort.desc ? -1 : 1
     const byCode = (a: Item, b: Item) => (a.code ?? '').localeCompare(b.code ?? '', 'ja', { numeric: true })
@@ -125,13 +139,58 @@ export default function OrderPage() {
       if (sort.key === 'name') return a.name.localeCompare(b.name, 'ja') * dir
       return byCode(a, b) * dir
     })
-  }, [items, q, sup, onlyCart, onlyFav, favs, cart, supName, sort, stats])
+  }, [items, q, sup, onlyCart, onlyFav, onlyShort, stock, favs, cart, supName, sort, stats]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const groups = useMemo(() => {
     const g: Record<string, { item: Item; qty: number }[]> = {}
     for (const i of items) if (cart[i.id] > 0) (g[i.supplier_id] ||= []).push({ item: i, qty: cart[i.id] })
     return Object.entries(g).sort((a, b) => (supName[a[0]] ?? '').localeCompare(supName[b[0]] ?? '', 'ja'))
   }, [items, cart, supName])
+
+  // 在庫が最低在庫数より少ない商品
+  function isShort(i: Item) {
+    const n = stock?.qty[i.id]
+    return i.min_stock != null && n !== undefined && n < i.min_stock
+  }
+
+  // Airレジの在庫 CSV を読み、最低在庫数を下回った商品に「最低在庫数 − 在庫数」の発注数を入れる
+  async function readStock(file: File | undefined) {
+    if (!file) return
+    setStockMsg('')
+    try {
+      const raw = await readCsv(file)
+      const head = Object.keys(raw[0] ?? {})
+      const idCols = STOCK_ID_COLS.filter(c => head.includes(c))
+      const qtyCol = STOCK_QTY_COLS.find(c => head.includes(c))
+      if (!idCols.length || !qtyCol) {
+        setStockMsg(`在庫 CSV の列が見つかりません。「${STOCK_ID_COLS.join('・')}」のどれかと「${STOCK_QTY_COLS.join('・')}」のどれかの列が要ります。（この CSV の列：${head.join('、') || 'なし'}）`)
+        return
+      }
+      const byCode = new Map<string, Item>()
+      for (const i of items) {
+        if (i.code) byCode.set(i.code, i)
+        if (i.barcode) byCode.set(i.barcode, i)
+      }
+      const qty: Record<string, number> = {}
+      let miss = 0
+      for (const r of raw) {
+        const item = idCols.map(c => byCode.get((r[c] ?? '').replace(/^'/, ''))).find(Boolean)
+        const n = Number((r[qtyCol] ?? '').replace(/,/g, ''))
+        if (!item || !Number.isFinite(n)) { miss++; continue }
+        qty[item.id] = n
+      }
+      const data = { at: new Date().toISOString(), file: file.name, qty }
+      setStock(data); writeLocal(STOCK_KEY, JSON.stringify(data))
+      const short = items.filter(i => i.min_stock != null && qty[i.id] !== undefined && qty[i.id] < i.min_stock)
+      setCart(c => {
+        const n = { ...c }
+        for (const i of short) n[i.id] = Math.max(1, i.min_stock! - qty[i.id])
+        return n
+      })
+      setStockMsg(`${Object.keys(qty).length}品の在庫を読み込みました${miss ? `（商品が見つからない行 ${miss}行）` : ''}。最低在庫数を下回った ${short.length}品に発注数を入れました。数は直せます。`)
+      if (short.length) setOnlyShort(true)
+    } catch (e) { setStockMsg(errorText(e)) }
+  }
 
   const setQty = (id: string, v: number) => setCart(c => {
     const n = { ...c }
@@ -202,9 +261,15 @@ export default function OrderPage() {
           <label className="check"><input type="checkbox" checked={onlyFav} onChange={e => setOnlyFav(e.target.checked)} />★ お気に入りだけ</label>
           <label className="check"><input type="checkbox" checked={onlyCart} onChange={e => setOnlyCart(e.target.checked)} />かごの商品だけ</label>
         </div>
+        <div className="toolbar">
+          <label className="btn">在庫 CSV を読み込む（Airレジ）<input type="file" accept=".csv,text/csv" hidden onChange={e => { readStock(e.target.files?.[0]); e.target.value = '' }} /></label>
+          {stock && <label className="check"><input type="checkbox" checked={onlyShort} onChange={e => setOnlyShort(e.target.checked)} />在庫が最低在庫数より少ないものだけ</label>}
+          {stock && <span className="muted small">在庫：{stock.file}（{jpDateTime(stock.at)} に読み込み）</span>}
+        </div>
+        {stockMsg && <p className="note small">{stockMsg}</p>}
         <div className="tbl-wrap">
           <table className="list">
-            <thead><tr><th aria-label="お気に入り" /><th>品番</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">発注</th><th className="num">数量</th></tr></thead>
+            <thead><tr><th aria-label="お気に入り" /><th>品番</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">発注</th><th className="num">在庫／最低</th><th className="num">数量</th></tr></thead>
             <tbody>
               {rows.map(i => (
                 <tr key={i.id} className={cart[i.id] ? 'picked' : undefined}>
@@ -216,6 +281,7 @@ export default function OrderPage() {
                   <td className="sub">{supName[i.supplier_id]}</td>
                   <td className="num">{yen(i.price)}</td>
                   <td className="num sub">{stats[i.id] ? `${stats[i.id].times}回` : '—'}</td>
+                  <td className={isShort(i) ? 'num warn' : 'num sub'}>{stock?.qty[i.id] ?? '—'}／{i.min_stock ?? '—'}</td>
                   <td className="num">
                     <span className="qty">
                       <button className="btn small" aria-label={`${i.name}を減らす`} onClick={() => setQty(i.id, (cart[i.id] || 0) - 1)}>−</button>
@@ -226,7 +292,7 @@ export default function OrderPage() {
                   </td>
                 </tr>
               ))}
-              {!loading && rows.length === 0 && <tr><td colSpan={7} className="muted">
+              {!loading && rows.length === 0 && <tr><td colSpan={8} className="muted">
                 {items.length === 0 ? '商品がまだありません。「商品」画面で登録するか、CSV で読み込んでください。'
                   : onlyFav && favs.size === 0 ? 'お気に入りはまだありません。商品の ☆ を押すと登録できます。' : '該当する商品がありません。'}
               </td></tr>}

@@ -1,12 +1,13 @@
 import { useApp } from '../lib/app'
 import { supabase } from '../lib/supabase'
 import type { Supplier } from '../lib/types'
-import { methodLabel } from '../lib/format'
+import { dealLabel, methodLabel } from '../lib/format'
 import { readCsv, writeCsv } from '../lib/csv'
 import MasterTable, { type Field } from '../components/MasterTable'
 import CsvImport from '../components/CsvImport'
 
-const HEADERS = ['取引先コード', '取引先名', '宛名', 'メール', 'FAX', '電話', '送り方', 'メモ', '使う']
+const HEADERS = ['取引先コード', '取引先名', '区分', '宛名', 'メール', 'FAX', '電話', '送り方', 'メモ', '使う']
+const DEAL_BY_LABEL: Record<string, Supplier['deal_type']> = { 買取: 'buy', 買: 'buy', 委託: 'consign', 委: 'consign', '買取・委託': 'both', '買・委': 'both' }
 
 export default function SuppliersPage() {
   const { suppliers, isAdmin, reload, toast } = useApp()
@@ -14,6 +15,9 @@ export default function SuppliersPage() {
   const fields: Field<Supplier>[] = [
     { key: 'code', label: '取引先コード', help: 'CSV で商品と結びつけるときに使います', render: r => <span className="chip">{r.code}</span> },
     { key: 'name', label: '取引先名', required: true },
+    { key: 'deal_type', label: '区分', type: 'select',
+      options: [{ value: '', label: '（なし）' }, { value: 'buy', label: '買取' }, { value: 'consign', label: '委託' }, { value: 'both', label: '買取・委託' }],
+      render: r => r.deal_type ? <span className="chip">{dealLabel[r.deal_type]}</span> : '' },
     { key: 'attention', label: '宛名', placeholder: '例 営業部 御中', render: false },
     { key: 'send_method', label: '送り方', type: 'select', required: true,
       options: [{ value: 'fax', label: 'FAX' }, { value: 'email', label: 'メール' }], render: r => <span className="chip">{methodLabel[r.send_method]}</span> },
@@ -27,7 +31,8 @@ export default function SuppliersPage() {
   const clean = (v: Partial<Supplier>) => ({
     code: v.code?.toString().trim() || null, name: v.name?.trim(), attention: v.attention?.trim() || '御中',
     email: v.email?.trim() ?? '', fax: v.fax?.trim() ?? '', tel: v.tel?.trim() ?? '',
-    send_method: v.send_method === 'email' ? 'email' : 'fax', note: v.note ?? '', active: v.active ?? true,
+    send_method: v.send_method === 'email' ? 'email' : 'fax',
+    deal_type: (['buy', 'consign', 'both'] as const).find(d => d === v.deal_type) ?? '', note: v.note ?? '', active: v.active ?? true,
   })
 
   async function save(v: Partial<Supplier>, id: string | null) {
@@ -45,7 +50,7 @@ export default function SuppliersPage() {
 
   function exportCsv() {
     writeCsv(suppliers.map(s => ({
-      取引先コード: s.code ?? '', 取引先名: s.name, 宛名: s.attention, メール: s.email, FAX: s.fax, 電話: s.tel,
+      取引先コード: s.code ?? '', 取引先名: s.name, 区分: dealLabel[s.deal_type], 宛名: s.attention, メール: s.email, FAX: s.fax, 電話: s.tel,
       送り方: methodLabel[s.send_method], メモ: s.note, 使う: s.active ? '1' : '0',
     })), HEADERS, '取引先.csv')
   }
@@ -59,6 +64,7 @@ export default function SuppliersPage() {
       rows.push(clean({
         code: r['取引先コード'], name: r['取引先名'], attention: r['宛名'], email: r['メール'], fax: r['FAX'], tel: r['電話'],
         send_method: /メール|mail/i.test(r['送り方'] ?? '') ? 'email' : 'fax', note: r['メモ'],
+        deal_type: DEAL_BY_LABEL[(r['区分'] ?? '').replace(/\s/g, '')] ?? '',
         active: !['0', 'いいえ', '×', 'false'].includes(r['使う'] ?? ''),
       }))
     })
@@ -87,7 +93,7 @@ export default function SuppliersPage() {
       title="取引先"
       note="「送り方」はおもに使う方法です。発注書の画面で、その送り方のボタンが強調されます。FAX 番号はハイフンがあっても大丈夫です。"
       rows={suppliers} fields={fields} canEdit={isAdmin} addLabel="取引先を追加"
-      blank={{ attention: '御中', send_method: 'fax', active: true }}
+      blank={{ attention: '御中', send_method: 'fax', deal_type: '', active: true }}
       search={(r, k) => `${r.code ?? ''} ${r.name} ${r.fax} ${r.email} ${r.tel}`.toLowerCase().includes(k)}
       onSave={save} onDelete={remove}
       toolbar={<>

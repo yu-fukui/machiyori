@@ -7,7 +7,7 @@ import { readCsv, writeCsv } from '../lib/csv'
 import MasterTable, { type Field } from '../components/MasterTable'
 import CsvImport from '../components/CsvImport'
 
-const HEADERS = ['取引先コード', '取引先名', '品番', '品名', '規格', '単位', '仕入れ価格', '販売価格', '税率', '使う']
+const HEADERS = ['取引先コード', '取引先名', '品番', '品名', '規格', '単位', '仕入れ価格', '販売価格', '税率', 'バーコード', '最低在庫数', '使う']
 
 /** 粗利率：販売価格（税込）から税を抜いた額に対する、仕入れ価格（税抜）との差 */
 function marginText(i: Pick<Item, 'price' | 'sale_price' | 'tax_rate'>) {
@@ -46,6 +46,9 @@ export default function ItemsPage() {
       render: r => r.sale_price == null ? <span className="muted">—</span> : <>{yen(r.sale_price)}<div className="sub">{marginText(r)}</div></> },
     { key: 'tax_rate', label: '税率', type: 'select', required: true,
       options: [{ value: '10', label: '10%' }, { value: '8', label: '8%（軽減）' }], render: r => `${r.tax_rate}%` },
+    { key: 'barcode', label: 'バーコード', help: 'Airレジの在庫 CSV と結びつけるときに使います（品番でも結びつきます）', render: false },
+    { key: 'min_stock', label: '最低在庫数', type: 'number', numeric: true, help: '在庫がこの数を下回ると、在庫 CSV を読み込んだときに発注数が入ります。空なら入りません',
+      render: r => r.min_stock == null ? <span className="muted">—</span> : r.min_stock },
     { key: 'active', label: '使う（発注画面に出す）', type: 'checkbox', render: r => r.active ? '' : <span className="chip">使わない</span> },
   ]
 
@@ -54,7 +57,9 @@ export default function ItemsPage() {
       supplier_id: v.supplier_id, code: v.code?.toString().trim() || null, name: v.name?.trim(),
       spec: v.spec ?? '', unit: v.unit || '個', price: Math.round(Number(v.price) || 0),
       sale_price: v.sale_price == null || (v.sale_price as unknown) === '' ? null : Math.round(Number(v.sale_price)),
-      tax_rate: Number(v.tax_rate) === 8 ? 8 : 10, active: v.active ?? true,
+      tax_rate: Number(v.tax_rate) === 8 ? 8 : 10, barcode: v.barcode?.toString().trim() ?? '',
+      min_stock: v.min_stock == null || (v.min_stock as unknown) === '' ? null : Math.max(0, Math.round(Number(v.min_stock))),
+      active: v.active ?? true,
     }
     const { error } = id ? await supabase.from('items').update(row).eq('id', id) : await supabase.from('items').insert(row)
     if (error) throw error
@@ -71,7 +76,8 @@ export default function ItemsPage() {
     const byId = Object.fromEntries(suppliers.map(s => [s.id, s]))
     writeCsv(items.map(i => ({
       取引先コード: byId[i.supplier_id]?.code ?? '', 取引先名: byId[i.supplier_id]?.name ?? '', 品番: i.code ?? '', 品名: i.name,
-      規格: i.spec, 単位: i.unit, 仕入れ価格: i.price, 販売価格: i.sale_price ?? '', 税率: i.tax_rate, 使う: i.active ? '1' : '0',
+      規格: i.spec, 単位: i.unit, 仕入れ価格: i.price, 販売価格: i.sale_price ?? '', 税率: i.tax_rate,
+      バーコード: i.barcode, 最低在庫数: i.min_stock ?? '', 使う: i.active ? '1' : '0',
     })), HEADERS, '商品.csv')
   }
 
@@ -91,11 +97,16 @@ export default function ItemsPage() {
       const sale = toYen(r['販売価格'])
       if (sale !== null && (!Number.isFinite(sale) || sale < 0)) { errors.push(`${line}行目：販売価格「${r['販売価格']}」が数字ではありません`); return }
       const rate = (r['税率'] ?? '').replace(/[%％\s]/g, '')
+      const minStock = toYen(r['最低在庫数'])
+      if (minStock !== null && (!Number.isFinite(minStock) || minStock < 0)) { errors.push(`${line}行目：最低在庫数「${r['最低在庫数']}」が数字ではありません`); return }
       out.push({
         supplier_id: s.id, code: r['品番'] || null, name: r['品名'], spec: r['規格'] ?? '', unit: r['単位'] || '個',
         price: Math.round(price),
         // 販売価格の列がない CSV（前のひな形）では、登録ずみの販売価格を消さない
         ...('販売価格' in r ? { sale_price: sale === null ? null : Math.round(sale) } : {}),
+        // バーコード・最低在庫数の列がない CSV では、登録ずみの値を消さない
+        ...('バーコード' in r ? { barcode: r['バーコード'] ?? '' } : {}),
+        ...('最低在庫数' in r ? { min_stock: minStock === null ? null : Math.round(minStock) } : {}),
         tax_rate: rate === '8' ? 8 : 10, active: !['0', 'いいえ', '×', 'false'].includes(r['使う'] ?? ''),
       })
     })
@@ -124,8 +135,8 @@ export default function ItemsPage() {
       title="商品"
       note={<>仕入れ価格は税抜、販売価格は税込で入れます。発注書には仕入れ価格が載ります。品番が同じ商品は CSV の読み込みで上書きされます。使わなくなった商品は「使う」のチェックを外すと、発注画面に出なくなります（過去の発注書はそのまま）。</>}
       rows={rows} fields={fields} canEdit={isAdmin} addLabel="商品を追加"
-      blank={{ supplier_id: sup || suppliers[0]?.id, unit: '個', price: 0, tax_rate: 10, active: true }}
-      search={(r, k) => `${r.code ?? ''} ${r.name} ${r.spec} ${supName[r.supplier_id] ?? ''}`.toLowerCase().includes(k)}
+      blank={{ supplier_id: sup || suppliers[0]?.id, unit: '個', price: 0, tax_rate: 10, barcode: '', min_stock: null, active: true }}
+      search={(r, k) => `${r.code ?? ''} ${r.name} ${r.spec} ${r.barcode} ${supName[r.supplier_id] ?? ''}`.toLowerCase().includes(k)}
       onSave={save} onDelete={remove}
       toolbar={<>
         <select aria-label="取引先" value={sup} onChange={e => setSup(e.target.value)}>
@@ -133,7 +144,7 @@ export default function ItemsPage() {
         </select>
         <button className="btn" onClick={exportCsv}>CSV 書き出し</button>
         {isAdmin && <CsvImport headers={HEADERS} parse={parse} importRows={importRows} unit="品"
-          help="取引先は「取引先コード」で結びつけます。コードが空なら「取引先名」で探します。税率は 8 か 10。CSV にない商品は消えません。品番が空の行は、毎回新しく追加します。" />}
+          help="取引先は「取引先コード」で結びつけます。コードが空なら「取引先名」で探します。税率は 8 か 10。最低在庫数は空でもかまいません。CSV にない商品は消えません。品番が空の行は、毎回新しく追加します。" />}
       </>}
     />
   )

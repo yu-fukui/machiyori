@@ -14,6 +14,12 @@ export default function SheetsPage({ ids }: { ids: string[] }) {
   const [leaving, setLeaving] = useState(false)   // 「発注画面へ」で、保存するかをたずねているあいだ
   const [leaveBusy, setLeaveBusy] = useState(false)
   const [leaveError, setLeaveError] = useState('')
+  const { suppliers, settings, toast } = useApp()
+  const apis = useRef(new Map<string, SheetApi>())
+  const register = useCallback((id: string, api: SheetApi | null) => { if (api) apis.current.set(id, api); else apis.current.delete(id) }, [])
+  const [bulk, setBulk] = useState<{ kind: 'fax' | 'email' | 'faxSent'; ids: string[] } | null>(null)
+  const [bulkBusy, setBulkBusy] = useState('')
+  const [bulkMsg, setBulkMsg] = useState('')
 
   const load = useCallback(async () => {
     if (ids.length === 0) { setOrders([]); return }
@@ -51,6 +57,47 @@ export default function SheetsPage({ ids }: { ids: string[] }) {
   // まだ履歴に残していない発注書（作っただけで、送る操作をしていない）
   const unsaved = orders.filter(o => !o.saved_at)
 
+  // まとめて送る相手：まだ送っていない発注書を、取引先のおもな送り方で分ける
+  const supOf = (o: Order) => suppliers.find(s => s.id === o.supplier_id) ?? o.supplier_snapshot
+  const pending = orders.filter(o => o.status === 'draft')
+  const faxTargets = pending.filter(o => supOf(o).send_method === 'fax' && supOf(o).fax)
+  const mailTargets = pending.filter(o => supOf(o).send_method === 'email' && supOf(o).email)
+  const faxByPrint = !settings.fax_gateway
+
+  // FAX の発注書をまとめて印刷する（会社の FAX 機・複合機の FAX ドライバーで送る）
+  async function bulkFaxPrint() {
+    const ids = faxTargets.map(o => o.id)
+    setBulkBusy('fax'); setBulkMsg('')
+    for (const id of ids) await apis.current.get(id)?.prepare()
+    setBulkBusy('')
+    await load()
+    print(ids, true, () => setBulk({ kind: 'faxSent', ids }))
+  }
+
+  // まとめて記録する：印刷して FAX で送れた発注書を送信済みにする
+  async function bulkMarkSent(ids: string[]) {
+    setBulkBusy('mark'); setBulkMsg('')
+    let ng = 0
+    for (const id of ids) {
+      const { error } = await supabase.rpc('mark_order_printed', { p_order_id: id })
+      if (error) ng++
+    }
+    setBulkBusy(''); setBulk(null)
+    setBulkMsg(ng ? `${ids.length - ng}枚を送信済みにしました。${ng}枚は記録できませんでした。` : `${ids.length}枚を送信済みにしました。`)
+    await load()
+  }
+
+  // メール（またはインターネットFAX）でまとめて送る
+  async function bulkSend(via: 'email' | 'fax', ids: string[]) {
+    setBulkBusy(via); setBulkMsg(''); setBulk(null)
+    let ok = 0
+    for (const id of ids) if (await apis.current.get(id)?.send(via)) ok++
+    setBulkBusy('')
+    setBulkMsg(ok === ids.length ? `${ok}件を送りました。` : `${ok}件を送りました。${ids.length - ok}件は送れませんでした（その発注書の下にわけを出しています）。`)
+    if (ok) toast(`${ok}件を送りました`)
+    await load()
+  }
+
   function back() {
     if (unsaved.length === 0) { go('order'); return }
     setLeaveError(''); setLeaving(true)
@@ -83,6 +130,34 @@ export default function SheetsPage({ ids }: { ids: string[] }) {
         {orders.length > 1 && <button className="btn" onClick={() => print(orders.map(o => o.id))}>すべて印刷</button>}
         <span className="muted small">{orders.length}枚。{unsaved.length > 0 ? '送る（メール・FAX・印刷・PDFを保存）と履歴に残ります。' : ''}</span>
       </div>
+      {pending.length > 1 && (faxTargets.length > 0 || mailTargets.length > 0) && (
+        <div className="toolbar no-print bulk">
+          <strong className="small">まとめて：</strong>
+          {faxTargets.length > 0 && (faxByPrint
+            ? <button className="btn primary" disabled={!!bulkBusy} onClick={bulkFaxPrint}>{bulkBusy === 'fax' ? '準備中…' : `FAX の発注書をまとめて印刷（${faxTargets.length}枚）`}</button>
+            : <button className="btn primary" disabled={!!bulkBusy} onClick={() => setBulk({ kind: 'fax', ids: faxTargets.map(o => o.id) })}>{`FAX でまとめて送る（${faxTargets.length}件）`}</button>)}
+          {mailTargets.length > 0 && <button className="btn primary" disabled={!!bulkBusy} onClick={() => setBulk({ kind: 'email', ids: mailTargets.map(o => o.id) })}>{bulkBusy === 'email' ? '送信中…' : `メールでまとめて送る（${mailTargets.length}件）`}</button>}
+          <span className="muted small">送り方が「FAX」「メール」の取引先で、まだ送っていない発注書が対象です。</span>
+        </div>
+      )}
+      {bulk && (
+        <div className="confirm no-print">
+          {bulk.kind === 'faxSent' && <>
+            <p>印刷した <b>{bulk.ids.length}枚</b> を、FAX で送れましたか？ 全部送れたら「全部送れた」を押してください。送信済みとして記録します。</p>
+            <p className="muted small">送れなかった発注書があるときは「1枚ずつ記録する」を押し、送れた発注書の「手で送った」を押してください。</p>
+          </>}
+          {bulk.kind === 'email' && <p><b>{bulk.ids.length}件</b> の発注書を、それぞれの取引先にメールで送ります（PDF を付けます）。</p>}
+          {bulk.kind === 'fax' && <p><b>{bulk.ids.length}件</b> の発注書を、インターネットFAX で送ります。</p>}
+          <div className="row">
+            {bulk.kind === 'faxSent'
+              ? <><button className="btn primary" disabled={!!bulkBusy} onClick={() => bulkMarkSent(bulk.ids)}>{bulkBusy ? '記録中…' : '全部送れた'}</button>
+                  <button className="btn" disabled={!!bulkBusy} onClick={() => setBulk(null)}>1枚ずつ記録する</button></>
+              : <><button className="btn primary" disabled={!!bulkBusy} onClick={() => bulkSend(bulk.kind as 'email' | 'fax', bulk.ids)}>{bulk.kind === 'email' ? 'メールを送る' : 'FAX を送る'}</button>
+                  <button className="btn" disabled={!!bulkBusy} onClick={() => setBulk(null)}>やめる</button></>}
+          </div>
+        </div>
+      )}
+      {bulkMsg && <p className="msg no-print">{bulkMsg}</p>}
       {leaving && (
         <div className="confirm no-print">
           <p>まだ送っていない発注書が <b>{unsaved.length}枚</b> あります。履歴に保存しますか？</p>
@@ -101,7 +176,7 @@ export default function SheetsPage({ ids }: { ids: string[] }) {
       {orders.map(o => (
         <SheetBlock key={o.id} order={o} reload={load} printTarget={!printing || printing.ids.includes(o.id)}
           faxPrinting={!!printing?.fax && printing.ids.includes(o.id)}
-          onPrint={(fax, after) => print([o.id], fax, after)} />
+          onPrint={(fax, after) => print([o.id], fax, after)} register={register} />
       ))}
     </div>
   )
@@ -127,9 +202,16 @@ function restoreForm(unsaved: Order[]): OrderForm {
   }
 }
 
-function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint }: {
+/** まとめて印刷・送信するときに、親の画面から1枚ずつの発注書を動かすための口 */
+interface SheetApi {
+  prepare: () => Promise<void>                       // 履歴に残し、ドライブに保存する（印刷の前）
+  send: (via: 'email' | 'fax') => Promise<boolean>   // 送れたら true
+}
+
+function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint, register }: {
   order: Order; reload: () => Promise<void>; printTarget: boolean; faxPrinting: boolean
   onPrint: (fax?: boolean, after?: () => void) => void
+  register: (id: string, api: SheetApi | null) => void
 }) {
   const { suppliers, settings, toast } = useApp()
   const ref = useRef<HTMLDivElement>(null)
@@ -195,19 +277,24 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint }: {
   }
 
   // 印刷の前に PDF を作ってドライブに保存する（FAX の欄を付ける前の発注書を保存する）
-  async function printWithSave(fax: boolean) {
-    setBusy('print'); setError(''); setConfirm(null)
+  // 印刷の前：履歴に残し、FAX の欄を付ける前の発注書をドライブに保存する
+  async function prepare() {
     try { await keep() } catch (e) { setError(`履歴に残せませんでした：${errorText(e)}`) }
     try {
       if (settings.drive_folder_id) { await uploadPdf(); void saveToDrive() }
     } catch (e) { setError(`Google ドライブ用の PDF を作れませんでした：${errorText(e)}`) }
-    finally { setBusy('') }
+  }
+
+  async function printWithSave(fax: boolean) {
+    setBusy('print'); setError(''); setConfirm(null)
+    await prepare()
+    setBusy('')
     if (!o.saved_at) void reload()
     if (fax) onPrint(true, () => setConfirm(o.status === 'draft' ? 'faxPrinted' : null))
     else onPrint()
   }
 
-  async function send(via: 'email' | 'fax') {
+  async function send(via: 'email' | 'fax', quiet = false) {
     setBusy(via); setError('')
     try {
       await uploadPdf()
@@ -219,12 +306,22 @@ function SheetBlock({ order: o, reload, printTarget, faxPrinting, onPrint }: {
         const body = ctx ? await ctx.json().catch(() => null) : null
         throw new Error(body?.error || errorText(error))
       }
-      toast(via === 'email' ? `${data.to} にメールで送りました` : `FAX の送信を受け付けました（${sup.fax}）。結果はメールで届きます`)
+      if (!quiet) toast(via === 'email' ? `${data.to} にメールで送りました` : `FAX の送信を受け付けました（${sup.fax}）。結果はメールで届きます`)
       setConfirm(null)
-      await reload()
-    } catch (e) { setError(errorText(e)) }
+      if (!quiet) await reload()
+      return true
+    } catch (e) { setError(errorText(e)); return false }
     finally { setBusy('') }
   }
+
+  // 親の画面に、いまの prepare・send を渡しておく
+  const api = useRef<SheetApi>({ prepare, send: v => send(v, true) })
+  api.current.prepare = prepare
+  api.current.send = v => send(v, true)
+  useEffect(() => {
+    register(o.id, { prepare: () => api.current.prepare(), send: v => api.current.send(v) })
+    return () => register(o.id, null)
+  }, [o.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function saveRemarks() {
     if (remarks === null) return

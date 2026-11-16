@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage'
 import OrderPage from './pages/OrderPage'
 import SheetsPage from './pages/SheetsPage'
 import HistoryPage from './pages/HistoryPage'
+import MonthlyPage from './pages/MonthlyPage'
 import ItemsPage from './pages/ItemsPage'
 import SuppliersPage from './pages/SuppliersPage'
 import StoresPage from './pages/StoresPage'
@@ -17,6 +18,7 @@ import SettingsPage from './pages/SettingsPage'
 const NAV: { path: string; label: string; admin?: boolean }[] = [
   { path: 'order', label: '発注' },
   { path: 'history', label: '履歴' },
+  { path: 'monthly', label: '月の一覧' },
   { path: 'items', label: '商品' },
   { path: 'suppliers', label: '取引先' },
   { path: 'stores', label: '店舗', admin: true },
@@ -106,6 +108,7 @@ export default function App() {
           : page === 'order' ? <OrderPage />
           : page === 'sheets' ? <SheetsPage ids={(route[1] ?? '').split(',').filter(Boolean)} />
           : page === 'history' ? <HistoryPage />
+          : page === 'monthly' ? <MonthlyPage />
           : page === 'items' ? <ItemsPage />
           : page === 'suppliers' ? <SuppliersPage />
           : page === 'stores' ? <StoresPage />

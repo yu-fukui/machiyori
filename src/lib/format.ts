@@ -25,6 +25,7 @@ export function faxAddress(gateway: string, fax: string) {
 
 export const methodLabel = { fax: 'FAX', email: 'メール' } as const
 export const kindLabel = { fixed: '実店舗', mobile: '外販' } as const
+export const dealLabel = { '': '', buy: '買取', consign: '委託', both: '買取・委託' } as const
 export const deliveryLabel = { venue: '外販の会場に納品', store: '店舗に納品', pickup: '集荷', address: '指定の住所' } as const
 
 const md = (s: string) => { const [, m, d] = s.split('-'); return `${+m}/${+d}` }

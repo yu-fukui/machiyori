@@ -168,5 +168,16 @@ fieldset.field legend { font-size: 12px; color: var(--muted); padding: 0; margin
   .sheet-block { margin: 0; }
   .sheet-block:not(.print-target) { display: none; }
   .sheet { box-shadow: none; margin: 0; break-after: page; }
+  .print-only { display: block; }
+  .monthly-page { border: 0; padding: 12mm; }
+  .monthly-page input { border: 0; background: none; }
+  .monthly-page .tbl-wrap { overflow: visible; }
 }
+.print-only { display: none; }
+.bulk { background: var(--picked); border-radius: 8px; padding: 8px 10px; }
+table.monthly input:not([type=checkbox]) { width: 100%; min-width: 7em; }
+table.monthly input.amount { text-align: right; }
+table.monthly tr.sub-rows > td { background: var(--chip); padding: 4px 8px 8px 28px; }
+table.inner { font-size: 12px; }
+td.warn { font-weight: 700; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

@@ -35,6 +35,7 @@ export interface Supplier {
   fax: string
   tel: string
   send_method: 'fax' | 'email'
+  deal_type: '' | 'buy' | 'consign' | 'both'   // 買取・委託
   note: string
   active: boolean
 }
@@ -49,6 +50,8 @@ export interface Item {
   price: number              // 仕入れ価格（税抜）。発注書にはこれを載せる
   sale_price: number | null  // 販売価格（税込）
   tax_rate: 8 | 10
+  barcode: string
+  min_stock: number | null   // 最低在庫数。空なら在庫 CSV で自動の発注数を入れない
   active: boolean
 }
 
@@ -123,4 +126,12 @@ export interface Order {
   saved_at: string | null   // 履歴に残した日時。空は「作っただけ」
   created_at: string
   order_lines?: OrderLine[]
+}
+
+export interface InvoiceCheck {
+  supplier_id: string
+  month: string              // その月の1日（YYYY-MM-01）
+  invoice_amount: number | null
+  checked: boolean
+  note: string
 }
