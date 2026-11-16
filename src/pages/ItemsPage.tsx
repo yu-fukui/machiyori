@@ -145,7 +145,7 @@ export default function ItemsPage() {
       title="商品"
       note={<>仕入れ価格は税抜、販売価格は税込で入れます。発注書には仕入れ価格が載ります。品番が同じ商品は CSV の読み込みで上書きされます。使わなくなった商品は「使う」のチェックを外すと、発注画面に出なくなります（過去の発注書はそのまま）。</>}
       rows={rows} fields={fields} canEdit={isAdmin} addLabel="商品を追加"
-      blank={{ supplier_id: sup || suppliers[0]?.id, unit: '個', price: 0, tax_rate: 10, barcode: '', min_stock: 10, active: true }}
+      blank={{ supplier_id: sup || suppliers[0]?.id, unit: '個', price: 0, tax_rate: 10, barcode: '', min_stock: 10, target_stock: 18, active: true }}
       search={(r, k) => `${r.code ?? ''} ${r.name} ${r.spec} ${r.barcode} ${supName[r.supplier_id] ?? ''}`.toLowerCase().includes(k)}
       onSave={save} onDelete={remove}
       toolbar={<>
