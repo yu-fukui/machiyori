@@ -321,7 +321,7 @@ export default function OrderPage() {
         {stockMsg && <p className="note small">{stockMsg}</p>}
         <div className="tbl-wrap">
           <table className="list">
-            <thead><tr><th aria-label="お気に入り" /><th>品番</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">発注</th><th className="num">在庫</th><th className="num">発注ライン</th><th className="num">数量</th></tr></thead>
+            <thead><tr><th aria-label="お気に入り" /><th>品番</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">在庫</th><th className="num">発注ライン</th><th className="num">数量</th></tr></thead>
             <tbody>
               {rows.map(i => (
                 <tr key={i.id} className={[cart[i.id] ? 'picked' : '', stockLevel(i) ? `stock-${stockLevel(i)}` : ''].join(' ').trim() || undefined}>
@@ -332,7 +332,6 @@ export default function OrderPage() {
                   <td>{i.name}<div className="sub">{i.spec}{i.spec && ' ／ '}{i.unit}{i.tax_rate === 8 && ' ／ 軽減8%'}{i.sale_price != null && ` ／ 販売 ${yen(i.sale_price)}`}</div></td>
                   <td className="sub">{supName[i.supplier_id]}</td>
                   <td className="num">{yen(i.price)}</td>
-                  <td className="num sub">{stats[i.id] ? `${stats[i.id].times}回` : '—'}</td>
                   <td className="num">{stock?.qty[i.id] ?? '—'}</td>
                   <td className="num sub">{i.min_stock ?? '—'}</td>
                   <td className="num">
@@ -345,7 +344,7 @@ export default function OrderPage() {
                   </td>
                 </tr>
               ))}
-              {!loading && rows.length === 0 && <tr><td colSpan={9} className="muted">
+              {!loading && rows.length === 0 && <tr><td colSpan={8} className="muted">
                 {items.length === 0 ? '商品がまだありません。「商品」画面で登録するか、CSV で読み込んでください。'
                   : onlyFav && favs.size === 0 ? 'お気に入りはまだありません。商品の ☆ を押すと登録できます。' : '該当する商品がありません。'}
               </td></tr>}
