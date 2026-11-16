@@ -7,7 +7,7 @@ import { readCsv, writeCsv } from '../lib/csv'
 import MasterTable, { type Field } from '../components/MasterTable'
 import CsvImport from '../components/CsvImport'
 
-const HEADERS = ['取引先コード', '取引先名', '品番（Airレジ）', '品名', '規格', '単位', '仕入れ価格', '販売価格', '税率', 'バーコード', '発注ライン', '設定在庫数', '使う']
+const HEADERS = ['取引先コード', '取引先名', '品番（Airレジ）', '品名', '規格', '単位', '仕入れ価格', '販売価格', '税率', 'バーコード', '発注ライン', '設定在庫数', '使う', '備考']
 
 /** 粗利率：販売価格（税込）から税を抜いた額に対する、仕入れ価格（税抜）との差 */
 function marginText(i: Pick<Item, 'price' | 'sale_price' | 'tax_rate'>) {
@@ -21,9 +21,11 @@ const toYen = (v: string | undefined) => {
 }
 
 export default function ItemsPage() {
-  const { suppliers, isAdmin, toast } = useApp()
+  const { suppliers, isAdmin, toast, profile } = useApp()
   const [items, setItems] = useState<Item[]>([])
   const [sup, setSup] = useState('')
+  // 使う／使わないの切り替え：切り替える商品と、備考に残すコメント
+  const [toggling, setToggling] = useState<{ id: string; comment: string; busy: boolean; error: string } | null>(null)
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('items').select('*').order('code')
@@ -51,8 +53,43 @@ export default function ItemsPage() {
       render: r => r.min_stock == null ? <span className="muted">—</span> : r.min_stock },
     { key: 'target_stock', label: '設定在庫数', type: 'number', numeric: true, help: '在庫 CSV から数量を自動で入れるとき、「設定在庫数 − 在庫」を数量にします。空なら自動で入れません',
       render: r => r.target_stock == null ? <span className="muted">—</span> : r.target_stock },
-    { key: 'active', label: '使う（発注画面に出す）', type: 'checkbox', render: r => r.active ? '' : <span className="chip">使わない</span> },
+    { key: 'active', label: '使う', type: 'checkbox', form: false, render: r => (
+      <div className="toggle-cell">
+        <button type="button" role="switch" aria-checked={r.active} className={`mini-switch${r.active ? ' on' : ''}`} disabled={!isAdmin}
+          aria-label={`${r.name}を${r.active ? '使わない' : '使う'}にする`} title={isAdmin ? '押すと切り替えます（理由を備考に残します）' : ''}
+          onClick={() => setToggling(t => t?.id === r.id ? null : { id: r.id, comment: '', busy: false, error: '' })}>
+          <span />{r.active ? '使う' : '使わない'}
+        </button>
+        {toggling?.id === r.id && (
+          <form className="toggle-form" onSubmit={e => { e.preventDefault(); toggleActive(r) }}>
+            <label htmlFor={`tg-${r.id}`}>「{r.active ? '使わない' : '使う'}」にする理由（備考に残ります）</label>
+            <input id={`tg-${r.id}`} autoFocus required placeholder="例 取り扱い終了、季節商品のため" value={toggling.comment}
+              onChange={e => setToggling(t => t && { ...t, comment: e.target.value })} />
+            <div className="row">
+              <button className="btn small primary" disabled={toggling.busy || !toggling.comment.trim()}>{toggling.busy ? '保存中…' : `${r.active ? '使わない' : '使う'}にする`}</button>
+              <button type="button" className="btn small" onClick={() => setToggling(null)}>やめる</button>
+            </div>
+            {toggling.error && <p className="msg">{toggling.error}</p>}
+          </form>
+        )}
+      </div>
+    ) },
+    { key: 'note', label: '備考', type: 'textarea', render: r => r.note ? <div className="note-cell" title={r.note}>{r.note}</div> : <span className="muted">—</span> },
   ]
+
+  // 使う／使わないを切り替え、理由を備考の先頭に残す（日付・内容・コメント・切り替えた人）
+  async function toggleActive(r: Item) {
+    if (!toggling) return
+    const to = !r.active
+    const day = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })
+    const line = `${day} ${to ? '使う' : '使わない'}に変更：${toggling.comment.trim()}（${profile.name || profile.email}）`
+    setToggling(t => t && { ...t, busy: true, error: '' })
+    const { error } = await supabase.from('items').update({ active: to, note: r.note ? `${line}\n${r.note}` : line }).eq('id', r.id)
+    if (error) { setToggling(t => t && { ...t, busy: false, error: error.message }); return }
+    setToggling(null)
+    toast(`${r.name}を「${to ? '使う' : '使わない'}」にしました`)
+    await load()
+  }
 
   async function save(v: Partial<Item>, id: string | null) {
     const row = {
@@ -61,6 +98,7 @@ export default function ItemsPage() {
       sale_price: v.sale_price == null || (v.sale_price as unknown) === '' ? null : Math.round(Number(v.sale_price)),
       tax_rate: Number(v.tax_rate) === 8 ? 8 : 10, barcode: v.barcode?.toString().trim() ?? '',
       min_stock: v.min_stock == null || (v.min_stock as unknown) === '' ? null : Math.max(0, Math.round(Number(v.min_stock))),
+      note: v.note ?? '',
       target_stock: v.target_stock == null || (v.target_stock as unknown) === '' ? null : Math.max(0, Math.round(Number(v.target_stock))),
       active: v.active ?? true,
     }
@@ -80,7 +118,7 @@ export default function ItemsPage() {
     writeCsv(items.map(i => ({
       取引先コード: byId[i.supplier_id]?.code ?? '', 取引先名: byId[i.supplier_id]?.name ?? '', '品番（Airレジ）': i.code ?? '', 品名: i.name,
       規格: i.spec, 単位: i.unit, 仕入れ価格: i.price, 販売価格: i.sale_price ?? '', 税率: i.tax_rate,
-      バーコード: i.barcode, 発注ライン: i.min_stock ?? '', 設定在庫数: i.target_stock ?? '', 使う: i.active ? '1' : '0',
+      バーコード: i.barcode, 発注ライン: i.min_stock ?? '', 設定在庫数: i.target_stock ?? '', 使う: i.active ? '1' : '0', 備考: i.note,
     })), HEADERS, '商品.csv')
   }
 
@@ -118,6 +156,7 @@ export default function ItemsPage() {
         ...(lineCol ? { min_stock: minStock === null ? null : Math.round(minStock) } : {}),
         ...('設定在庫数' in r ? { target_stock: target === null ? null : Math.round(target) } : {}),
         tax_rate: rate === '8' ? 8 : 10, active: !['0', 'いいえ', '×', 'false'].includes(r['使う'] ?? ''),
+        ...('備考' in r ? { note: r['備考'] ?? '' } : {}),   // 備考の列がない CSV では、登録ずみの備考を変えない
       })
     })
     const known = new Set(items.filter(i => i.code).map(i => `${i.supplier_id}|${i.code}`))
@@ -143,7 +182,7 @@ export default function ItemsPage() {
   return (
     <MasterTable<Item>
       title="商品"
-      note={<>仕入れ価格は税抜、販売価格は税込で入れます。発注書には仕入れ価格が載ります。品番が同じ商品は CSV の読み込みで上書きされます。使わなくなった商品は「使う」のチェックを外すと、発注画面に出なくなります（過去の発注書はそのまま）。</>}
+      note={<>仕入れ価格は税抜、販売価格は税込で入れます。発注書には仕入れ価格が載ります。品番が同じ商品は CSV の読み込みで上書きされます。使わなくなった商品は、一覧の「使う」を押して「使わない」にすると発注画面に出なくなります（過去の発注書はそのまま）。切り替えるときは理由を書き、備考に残します。</>}
       rows={rows} fields={fields} canEdit={isAdmin} addLabel="商品を追加"
       blank={{ supplier_id: sup || suppliers[0]?.id, unit: '個', price: 0, tax_rate: 10, barcode: '', min_stock: 10, target_stock: 18, active: true }}
       search={(r, k) => `${r.code ?? ''} ${r.name} ${r.spec} ${r.barcode} ${supName[r.supplier_id] ?? ''}`.toLowerCase().includes(k)}

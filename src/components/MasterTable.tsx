@@ -6,7 +6,7 @@ type Value = string | number | boolean | null
 export interface Field<T> {
   key: keyof T & string
   label: string
-  type?: 'text' | 'number' | 'email' | 'date' | 'select' | 'checkbox'
+  type?: 'text' | 'number' | 'email' | 'date' | 'select' | 'checkbox' | 'textarea'
   options?: { value: string; label: string }[]
   required?: boolean
   placeholder?: string
@@ -14,6 +14,8 @@ export interface Field<T> {
   /** 一覧に出すときの書き方。false なら一覧に出さない */
   render?: ((row: T) => ReactNode) | false
   numeric?: boolean
+  /** false なら編集フォームに出さない（一覧で切り替える項目など） */
+  form?: false
 }
 
 interface Props<T extends { id: string }> {
@@ -79,7 +81,7 @@ export default function MasterTable<T extends { id: string }>(p: Props<T>) {
         <form className="edit-form" onSubmit={save}>
           <h3>{editing.id ? '編集' : p.addLabel}</h3>
           <div className="form-grid">
-            {p.fields.map(f => {
+            {p.fields.filter(f => f.form !== false).map(f => {
               const v = editing.values[f.key] as Value | undefined
               const id = `f-${f.key}`
               if (f.type === 'checkbox') return (
@@ -88,7 +90,9 @@ export default function MasterTable<T extends { id: string }>(p: Props<T>) {
               return (
                 <div className="field" key={f.key}>
                   <label htmlFor={id} title={f.label}>{f.label}{f.required && ' *'}</label>
-                  {f.type === 'select'
+                  {f.type === 'textarea'
+                    ? <textarea id={id} value={String(v ?? '')} placeholder={f.placeholder} onChange={e => set(f.key, e.target.value)} />
+                    : f.type === 'select'
                     ? <select id={id} value={String(v ?? '')} required={f.required} onChange={e => set(f.key, e.target.value)}>
                         {!f.required && <option value="">—</option>}
                         {f.options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
