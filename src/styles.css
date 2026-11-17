@@ -124,6 +124,7 @@ table.list { width: 100%; border-collapse: collapse; font-variant-numeric: tabul
 table.list th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 400; border-bottom: 1px solid var(--line); padding: 6px 8px; white-space: nowrap; }
 table.list td { border-bottom: 1px solid var(--line); padding: 6px 8px; vertical-align: middle; }
 table.list tr.picked td { background: var(--picked); }
+table.list tr.inactive td { color: var(--muted); background: var(--chip); }
 /* 発注画面：在庫が発注ラインを下回ったら赤、120% 未満なら黄（選んだ行でも在庫の色を出す） */
 table.list tr.stock-short td { background: var(--row-short); }
 table.list tr.stock-near td { background: var(--row-near); }

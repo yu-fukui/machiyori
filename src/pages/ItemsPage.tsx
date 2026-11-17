@@ -6,6 +6,7 @@ import { yen } from '../lib/format'
 import { readCsv, writeCsv } from '../lib/csv'
 import MasterTable, { type Field } from '../components/MasterTable'
 import CsvImport from '../components/CsvImport'
+import ActiveToggle from '../components/ActiveToggle'
 
 /** 商品の CSV の列（発注画面の「未登録の商品」の書き出しでも使う） */
 export const HEADERS = ['取引先コード', '取引先名', '品番（Airレジ）', '品名', '規格', '単位', '仕入れ価格', '販売価格', '税率', 'バーコード', '発注ライン', '設定在庫数', '使う', '備考']
@@ -22,11 +23,9 @@ const toYen = (v: string | undefined) => {
 }
 
 export default function ItemsPage() {
-  const { suppliers, isAdmin, toast, profile } = useApp()
+  const { suppliers, isAdmin, toast } = useApp()
   const [items, setItems] = useState<Item[]>([])
   const [sup, setSup] = useState('')
-  // 使う／使わないの切り替え：切り替える商品と、備考に残すコメント
-  const [toggling, setToggling] = useState<{ id: string; comment: string; busy: boolean; error: string } | null>(null)
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('items').select('*').order('code')
@@ -54,43 +53,9 @@ export default function ItemsPage() {
       render: r => r.min_stock == null ? <span className="muted">—</span> : r.min_stock },
     { key: 'target_stock', label: '設定在庫数', type: 'number', numeric: true, help: '在庫 CSV から数量を自動で入れるとき、「設定在庫数 − 在庫」を数量にします。空なら自動で入れません',
       render: r => r.target_stock == null ? <span className="muted">—</span> : r.target_stock },
-    { key: 'active', label: '使う', type: 'checkbox', form: false, render: r => (
-      <div className="toggle-cell">
-        <button type="button" role="switch" aria-checked={r.active} className={`mini-switch${r.active ? ' on' : ''}`} disabled={!isAdmin}
-          aria-label={`${r.name}を${r.active ? '使わない' : '使う'}にする`} title={isAdmin ? '押すと切り替えます（理由を備考に残します）' : ''}
-          onClick={() => setToggling(t => t?.id === r.id ? null : { id: r.id, comment: '', busy: false, error: '' })}>
-          <span />{r.active ? '使う' : '使わない'}
-        </button>
-        {toggling?.id === r.id && (
-          <form className="toggle-form" onSubmit={e => { e.preventDefault(); toggleActive(r) }}>
-            <label htmlFor={`tg-${r.id}`}>「{r.active ? '使わない' : '使う'}」にする理由（備考に残ります）</label>
-            <input id={`tg-${r.id}`} autoFocus required placeholder="例 取り扱い終了、季節商品のため" value={toggling.comment}
-              onChange={e => setToggling(t => t && { ...t, comment: e.target.value })} />
-            <div className="row">
-              <button className="btn small primary" disabled={toggling.busy || !toggling.comment.trim()}>{toggling.busy ? '保存中…' : `${r.active ? '使わない' : '使う'}にする`}</button>
-              <button type="button" className="btn small" onClick={() => setToggling(null)}>やめる</button>
-            </div>
-            {toggling.error && <p className="msg">{toggling.error}</p>}
-          </form>
-        )}
-      </div>
-    ) },
+    { key: 'active', label: '使う', type: 'checkbox', form: false, render: r => <ActiveToggle item={r} onDone={() => load()} /> },
     { key: 'note', label: '備考', type: 'textarea', render: r => r.note ? <div className="note-cell" title={r.note}>{r.note}</div> : <span className="muted">—</span> },
   ]
-
-  // 使う／使わないを切り替え、理由を備考の先頭に残す（日付・内容・コメント・切り替えた人）
-  async function toggleActive(r: Item) {
-    if (!toggling) return
-    const to = !r.active
-    const day = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })
-    const line = `${day} ${to ? '使う' : '使わない'}に変更：${toggling.comment.trim()}（${profile.name || profile.email}）`
-    setToggling(t => t && { ...t, busy: true, error: '' })
-    const { error } = await supabase.from('items').update({ active: to, note: r.note ? `${line}\n${r.note}` : line }).eq('id', r.id)
-    if (error) { setToggling(t => t && { ...t, busy: false, error: error.message }); return }
-    setToggling(null)
-    toast(`${r.name}を「${to ? '使う' : '使わない'}」にしました`)
-    await load()
-  }
 
   async function save(v: Partial<Item>, id: string | null) {
     const row = {

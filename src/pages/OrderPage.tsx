@@ -5,6 +5,7 @@ import type { DeliveryType, Item } from '../lib/types'
 import { errorText, jpDateW, kindLabel, nextFriday, methodLabel, periodText, readLocal, todayJst, writeLocal, yen } from '../lib/format'
 import { readCsv, writeCsv } from '../lib/csv'
 import { HEADERS as ITEM_HEADERS } from './ItemsPage'
+import ActiveToggle from '../components/ActiveToggle'
 
 const CART_KEY = 'machiyori.cart'
 const AUTO_KEY = 'machiyori.autofilled'   // 在庫から自動で入れた数量（開き直してもオフで消せるように残す）
@@ -91,7 +92,10 @@ export default function OrderPage() {
   // 終わった外販は出さない
   const today = todayJst()
   const activeStores = stores.filter(s => s.active && !(s.kind === 'mobile' && s.end_date && s.end_date < today))
-  const [items, setItems] = useState<Item[]>([])
+  // 商品はすべて読む（「使わない」商品も、ここで「使う」に戻せるように）。発注に使うのは「使う」商品だけ
+  const [allItems, setAllItems] = useState<Item[]>([])
+  const items = useMemo(() => allItems.filter(i => i.active), [allItems])
+  const [showInactive, setShowInactive] = useState(false)   // 「使わない」商品も一覧に出す
   const [stats, setStats] = useState<Record<string, { times: number; qty: number }>>({})
   const [favs, setFavs] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
@@ -125,10 +129,10 @@ export default function OrderPage() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from('items').select('*').eq('active', true).order('code'),
+      supabase.from('items').select('*').order('code'),
       supabase.from('item_favorites').select('item_id').eq('user_id', profile.id),
     ]).then(([it, fv]) => {
-      setItems((it.data ?? []) as Item[])
+      setAllItems((it.data ?? []) as Item[])
       setFavs(new Set((fv.data ?? []).map(f => f.item_id as string)))
       setLoading(false)
     })
@@ -171,7 +175,7 @@ export default function OrderPage() {
 
   const rows = useMemo(() => {
     const k = q.trim().toLowerCase()
-    const list = items.filter(i =>
+    const list = (showInactive ? allItems : items).filter(i =>
       !supById[i.supplier_id]?.no_order &&   // 発注しない取引先の商品は出さない
       (!sup || i.supplier_id === sup) &&
       (!onlyCart || cart[i.id] > 0) &&
@@ -195,7 +199,7 @@ export default function OrderPage() {
       if (sort.key === 'name') return a.name.localeCompare(b.name, 'ja') * dir
       return byCode(a, b) * dir
     })
-  }, [items, q, sup, onlyCart, onlyFav, onlyShort, stock, favs, cart, supName, sort, stats]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, allItems, showInactive, q, sup, onlyCart, onlyFav, onlyShort, stock, favs, cart, supName, sort, stats]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const groups = useMemo(() => {
     const g: Record<string, { item: Item; qty: number }[]> = {}
@@ -204,6 +208,15 @@ export default function OrderPage() {
     const code = (id: string) => supById[id]?.code ?? ''
     return Object.entries(g).sort((a, b) => code(a[0]).localeCompare(code(b[0]), 'ja', { numeric: true }))
   }, [items, cart, supName])
+
+  // 使う／使わないを切り替えた商品を一覧に反映する。「使わない」にしたら、かごの数量も外す
+  function updateItem(u: Item) {
+    setAllItems(list => list.map(i => i.id === u.id ? u : i))
+    if (!u.active) {
+      setCart(c => { if (!(u.id in c)) return c; const n = { ...c }; delete n[u.id]; return n })
+      setAutoFilled(a => { if (!a || !(u.id in a)) return a; const n = { ...a }; delete n[u.id]; return n })
+    }
+  }
 
   // 足りない数（設定在庫数 − 在庫数）。在庫か設定在庫数がなければ null
   function shortBy(i: Item) {
@@ -433,6 +446,7 @@ export default function OrderPage() {
           {sortButton}
           <label className="check"><input type="checkbox" checked={onlyFav} onChange={e => setOnlyFav(e.target.checked)} />★ お気に入りだけ</label>
           <label className="check"><input type="checkbox" checked={onlyCart} onChange={e => setOnlyCart(e.target.checked)} />かごの商品だけ</label>
+          <label className="check"><input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />「使わない」商品も出す（{allItems.length - items.length}品）</label>
         </div>
         {stock && <div className="toolbar">
           <label className="switch"><input type="checkbox" role="switch" checked={!!autoFilled} onChange={e => toggleAuto(e.target.checked)} />
@@ -466,10 +480,10 @@ export default function OrderPage() {
         )}
         <div className="tbl-wrap">
           <table className="list">
-            <thead><tr><th aria-label="お気に入り" /><th>品番（Airレジ）</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">在庫</th><th className="num">発注ライン</th><th className="num">設定在庫数</th><th className="num">数量</th></tr></thead>
+            <thead><tr><th aria-label="お気に入り" /><th>品番（Airレジ）</th><th>品名・規格</th><th>取引先</th><th className="num">仕入れ(税抜)</th><th className="num">在庫</th><th className="num">発注ライン</th><th className="num">設定在庫数</th><th>使う</th><th className="num">数量</th></tr></thead>
             <tbody>
               {rows.map(i => (
-                <tr key={i.id} className={[cart[i.id] ? 'picked' : '', stockLevel(i) ? `stock-${stockLevel(i)}` : ''].join(' ').trim() || undefined}>
+                <tr key={i.id} className={[cart[i.id] ? 'picked' : '', !i.active ? 'inactive' : stockLevel(i) ? `stock-${stockLevel(i)}` : ''].join(' ').trim() || undefined}>
                   <td><button className={favs.has(i.id) ? 'star on' : 'star'} aria-pressed={favs.has(i.id)}
                     aria-label={favs.has(i.id) ? `${i.name}をお気に入りから外す` : `${i.name}をお気に入りにする`}
                     onClick={() => toggleFav(i.id)}>{favs.has(i.id) ? '★' : '☆'}</button></td>
@@ -480,17 +494,18 @@ export default function OrderPage() {
                   <td className="num">{stock?.qty[i.id] ?? '—'}</td>
                   <td className="num sub">{i.min_stock ?? '—'}</td>
                   <td className="num sub">{i.target_stock ?? '—'}</td>
+                  <td><ActiveToggle item={i} onDone={updateItem} /></td>
                   <td className="num">
-                    <span className="qty">
+                    {!i.active ? <span className="muted small">「使う」にすると<br />発注できます</span> : <span className="qty">
                       <button className="btn small" aria-label={`${i.name}を減らす`} onClick={() => setQty(i.id, (cart[i.id] || 0) - 1)}>−</button>
                       <input type="number" min={0} inputMode="numeric" aria-label={`${i.name}の数量`} placeholder="0"
                         value={cart[i.id] || ''} onChange={e => setQty(i.id, +e.target.value)} />
                       <button className="btn small" aria-label={`${i.name}を増やす`} onClick={() => setQty(i.id, (cart[i.id] || 0) + 1)}>＋</button>
-                    </span>
+                    </span>}
                   </td>
                 </tr>
               ))}
-              {!loading && rows.length === 0 && <tr><td colSpan={9} className="muted">
+              {!loading && rows.length === 0 && <tr><td colSpan={10} className="muted">
                 {items.length === 0 ? '商品がまだありません。「商品」画面で登録するか、CSV で読み込んでください。'
                   : onlyFav && favs.size === 0 ? 'お気に入りはまだありません。商品の ☆ を押すと登録できます。' : '該当する商品がありません。'}
               </td></tr>}
