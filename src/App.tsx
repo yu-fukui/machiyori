@@ -13,16 +13,19 @@ import SuppliersPage from './pages/SuppliersPage'
 import StoresPage from './pages/StoresPage'
 import StaffPage from './pages/StaffPage'
 import SettingsPage from './pages/SettingsPage'
+import FinancePage from './pages/FinancePage'
+import Icon, { type IconName } from './components/Icon'
 
-const NAV: { path: string; label: string; admin?: boolean }[] = [
-  { path: 'order', label: '発注' },
-  { path: 'history', label: '履歴' },
-  { path: 'monthly', label: '月の一覧' },
-  { path: 'items', label: '商品' },
-  { path: 'suppliers', label: '取引先' },
-  { path: 'stores', label: '店舗', admin: true },
-  { path: 'staff', label: 'スタッフ', admin: true },
-  { path: 'settings', label: '設定', admin: true },
+const NAV: { path: string; label: string; icon: IconName; admin?: boolean }[] = [
+  { path: 'order', label: '発注', icon: 'order' },
+  { path: 'history', label: '履歴', icon: 'history' },
+  { path: 'monthly', label: '月の一覧', icon: 'monthly' },
+  { path: 'finance', label: '売上・経費', icon: 'finance', admin: true },
+  { path: 'items', label: '商品', icon: 'items' },
+  { path: 'suppliers', label: '取引先', icon: 'suppliers' },
+  { path: 'stores', label: '店舗', icon: 'stores', admin: true },
+  { path: 'staff', label: 'スタッフ', icon: 'staff', admin: true },
+  { path: 'settings', label: '設定', icon: 'settings', admin: true },
 ]
 
 export default function App() {
@@ -96,14 +99,16 @@ export default function App() {
   return (
     <AppContext.Provider value={data}>
       <header className="top no-print">
-        <a className="brand" href="#/order">まちより 発注</a>
-        <nav>
+        <a className="brand" href="#/order"><span className="brand-mark" aria-hidden="true">ま</span>まちより 発注</a>
+        <nav aria-label="メニュー">
           {NAV.filter(n => !n.admin || isAdmin).map(n => (
-            <a key={n.path} href={'#/' + n.path} aria-current={page === n.path || (page === 'sheets' && n.path === 'history') ? 'page' : undefined}>{n.label}</a>
+            <a key={n.path} href={'#/' + n.path} aria-current={page === n.path || (page === 'sheets' && n.path === 'history') ? 'page' : undefined}>
+              <Icon name={n.icon} />{n.label}</a>
           ))}
         </nav>
-        <span className="who">{profile.name || profile.email}</span>
-        <button className="btn small" onClick={() => supabase.auth.signOut()}>ログアウト</button>
+        <span className="who"><span className="avatar" aria-hidden="true">{(profile.name || profile.email || '?').slice(0, 1)}</span>
+          <span className="who-name">{profile.name || profile.email}</span></span>
+        <button className="btn small quiet" onClick={() => supabase.auth.signOut()}><Icon name="logout" />ログアウト</button>
       </header>
       <main className="page">
         {!allowed ? <p className="muted">この画面は管理者だけが使えます。</p>
@@ -111,6 +116,7 @@ export default function App() {
           : page === 'sheets' ? <SheetsPage ids={(route[1] ?? '').split(',').filter(Boolean)} />
           : page === 'history' ? <HistoryPage />
           : page === 'monthly' ? <MonthlyPage />
+          : page === 'finance' ? <FinancePage />
           : page === 'items' ? <ItemsPage />
           : page === 'suppliers' ? <SuppliersPage />
           : page === 'stores' ? <StoresPage />

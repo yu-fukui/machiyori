@@ -25,7 +25,7 @@ export default function LoginPage() {
   return (
     <main className="center">
       <form className="panel narrow" onSubmit={submit}>
-        <h1>まちより 発注</h1>
+        <h1 className="login-brand"><span className="brand-mark" aria-hidden="true">ま</span>まちより 発注</h1>
         <p className="muted">管理者から受け取った ID とパスワードでログインしてください。</p>
         <div className="field"><label htmlFor="login-id">ID（またはメールアドレス）</label>
           <input id="login-id" autoComplete="username" autoCapitalize="none" spellCheck={false}

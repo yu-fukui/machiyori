@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { go, useApp } from '../lib/app'
 import type { DeliveryType, Item } from '../lib/types'
 import { errorText, jpDateW, kindLabel, nextFriday, methodLabel, periodText, readLocal, todayJst, writeLocal, yen } from '../lib/format'
+import Icon from '../components/Icon'
 import { readCsv, writeCsv } from '../lib/csv'
 import { HEADERS as ITEM_HEADERS } from './ItemsPage'
 import ActiveToggle from '../components/ActiveToggle'
@@ -393,7 +394,11 @@ export default function OrderPage() {
   const needStaleOk = stockState === 'none' || stockState === 'stale'
   const storeName = stores.find(s => s.id === storeId)?.name ?? ''
   const stockInput = (
-    <label className="btn">在庫 CSV を読み込んで保存する（Airレジ）<input type="file" accept=".csv,text/csv" hidden onChange={e => { readStock(e.target.files?.[0]); e.target.value = '' }} /></label>
+    <label className="action-card primary">
+      <span className="action-ico"><Icon name="upload" /></span>
+      <span><b>在庫 CSV を読み込む</b><small>Airレジの在庫 CSV を読み込んで保存します</small></span>
+      <input type="file" accept=".csv,text/csv" hidden onChange={e => { readStock(e.target.files?.[0]); e.target.value = '' }} />
+    </label>
   )
 
   const sortButton = (
@@ -488,8 +493,8 @@ export default function OrderPage() {
                     aria-label={favs.has(i.id) ? `${i.name}をお気に入りから外す` : `${i.name}をお気に入りにする`}
                     onClick={() => toggleFav(i.id)}>{favs.has(i.id) ? '★' : '☆'}</button></td>
                   <td><span className="chip">{i.code}</span></td>
-                  <td>{i.name}<div className="sub">{i.spec}{i.spec && ' ／ '}{i.unit}{i.tax_rate === 8 && ' ／ 軽減8%'}{i.sale_price != null && ` ／ 販売 ${yen(i.sale_price)}`}</div></td>
-                  <td className="sub">{supName[i.supplier_id]}</td>
+                  <td className="col-name">{i.name}<div className="sub">{i.spec}{i.spec && ' ／ '}{i.unit}{i.tax_rate === 8 && ' ／ 軽減8%'}{i.sale_price != null && ` ／ 販売 ${yen(i.sale_price)}`}</div></td>
+                  <td className="sub col-supplier">{supName[i.supplier_id]}</td>
                   <td className="num">{yen(i.price)}</td>
                   <td className="num">{stock?.qty[i.id] ?? '—'}</td>
                   <td className="num sub">{i.min_stock ?? '—'}</td>

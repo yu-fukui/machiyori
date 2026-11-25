@@ -126,7 +126,7 @@ export default function MasterTable<T extends { id: string }>(p: Props<T>) {
             {rows.map(r => (
               <tr key={r.id}>
                 {listFields.map(f => (
-                  <td key={f.key} className={f.numeric ? 'num' : undefined}>
+                  <td key={f.key} className={f.numeric ? 'num' : `col-${f.key}`}>
                     {f.render ? f.render(r) : String((r[f.key] as Value) ?? '')}
                   </td>
                 ))}
