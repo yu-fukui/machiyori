@@ -7,12 +7,15 @@ import Icon from '../components/Icon'
 
 interface Category { id: string; name: string; sort: number; active: boolean }
 interface Sale { store_id: string; month: string; amount: number; note: string }
+interface Purchase { store_id: string; month: string; amount: number }
 interface Expense { store_id: string; month: string; category_id: string; amount: number }
 interface Month {
   m: number            // 1〜12
   key: string          // YYYY-MM-01
   sales: number | null // 入れていなければ null
-  purchases: number
+  purchases: number    // 発注書の合計 ＋ 手入力の仕入れ
+  ordered: number      // うち発注書の合計
+  manual: number       // うち手入力の仕入れ
   expenses: number
   byCat: Record<string, number>
 }
@@ -24,7 +27,7 @@ const toNum = (s: string) => {
   return t === '' ? null : Number(t)
 }
 
-/** 月ごとの売上（手入力）・仕入れ（発注書の合計）・経費（手入力）を集計する */
+/** 月ごとの売上（手入力）・仕入れ（発注書の合計 ＋ 手入力）・経費（手入力）を集計する */
 export default function FinancePage() {
   const { stores, profile, toast } = useApp()
   const [year, setYear] = useState(() => Number(todayJst().slice(0, 4)))
@@ -32,6 +35,7 @@ export default function FinancePage() {
   const [cats, setCats] = useState<Category[]>([])
   const [sales, setSales] = useState<Sale[] | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
+  const [purchases, setPurchases] = useState<Purchase[]>([])
   const [orders, setOrders] = useState<{ store_id: string; order_date: string; total: number }[]>([])
   const [editing, setEditing] = useState<number | null>(null)
   const [error, setError] = useState('')
@@ -40,17 +44,19 @@ export default function FinancePage() {
   const load = useCallback(async () => {
     const from = `${year}-01-01`, to = `${year + 1}-01-01`
     let qs = supabase.from('monthly_sales').select('*').gte('month', from).lt('month', to)
+    let qp = supabase.from('monthly_purchases').select('store_id, month, amount').gte('month', from).lt('month', to)
     let qe = supabase.from('monthly_expenses').select('store_id, month, category_id, amount').gte('month', from).lt('month', to)
     let qo = supabase.from('orders').select('store_id, order_date, total')
       .not('saved_at', 'is', null).neq('status', 'cancelled').gte('order_date', from).lt('order_date', to)
-    if (store) { qs = qs.eq('store_id', store); qe = qe.eq('store_id', store); qo = qo.eq('store_id', store) }
+    if (store) { qs = qs.eq('store_id', store); qp = qp.eq('store_id', store); qe = qe.eq('store_id', store); qo = qo.eq('store_id', store) }
     setSales(null)
-    const [c, s, e, o] = await Promise.all([supabase.from('expense_categories').select('*').order('sort').order('name'), qs, qe, qo])
-    const err = c.error || s.error || e.error || o.error
+    const [c, s, e, o, p] = await Promise.all([supabase.from('expense_categories').select('*').order('sort').order('name'), qs, qe, qo, qp])
+    const err = c.error || s.error || e.error || o.error || p.error
     if (err) setError(errorText(err))
     setCats((c.data ?? []) as Category[])
     setSales((s.data ?? []) as Sale[])
     setExpenses((e.data ?? []) as Expense[])
+    setPurchases((p.data ?? []) as Purchase[])
     setOrders((o.data ?? []) as { store_id: string; order_date: string; total: number }[])
   }, [year, store])
   useEffect(() => { load() }, [load])
@@ -61,14 +67,16 @@ export default function FinancePage() {
     const ee = expenses.filter(x => x.month === key)
     const byCat: Record<string, number> = {}
     for (const x of ee) byCat[x.category_id] = (byCat[x.category_id] ?? 0) + x.amount
+    const ordered = orders.filter(o => o.order_date.slice(0, 7) === key.slice(0, 7)).reduce((a, o) => a + o.total, 0)
+    const manual = purchases.filter(x => x.month === key).reduce((a, x) => a + x.amount, 0)
     return {
       m, key,
       sales: ss.length ? ss.reduce((a, x) => a + x.amount, 0) : null,
-      purchases: orders.filter(o => o.order_date.slice(0, 7) === key.slice(0, 7)).reduce((a, o) => a + o.total, 0),
+      purchases: ordered + manual, ordered, manual,
       expenses: ee.reduce((a, x) => a + x.amount, 0),
       byCat,
     }
-  }), [year, sales, expenses, orders])
+  }), [year, sales, expenses, orders, purchases])
 
   const total = months.reduce((a, x) => ({
     sales: a.sales + (x.sales ?? 0), purchases: a.purchases + x.purchases, expenses: a.expenses + x.expenses,
@@ -78,12 +86,12 @@ export default function FinancePage() {
   const usedCats = cats.filter(c => c.active || expenses.some(e => e.category_id === c.id))
 
   function exportCsv() {
-    const headers = ['月', '売上（税込）', '仕入れ（発注・税込）', '粗利', '粗利率', ...usedCats.map(c => c.name), '経費合計', '利益']
+    const headers = ['月', '売上（税込）', '仕入れ（税込）', 'うち発注書', 'うち手入力', '粗利', '粗利率', ...usedCats.map(c => c.name), '経費合計', '利益', '利益率']
     writeCsv(months.map(x => {
       const s = x.sales ?? 0, g = s - x.purchases
       return {
-        月: `${year}年${x.m}月`, '売上（税込）': x.sales ?? '', '仕入れ（発注・税込）': x.purchases, 粗利: g, 粗利率: pct(g, s),
-        ...Object.fromEntries(usedCats.map(c => [c.name, x.byCat[c.id] ?? ''])), 経費合計: x.expenses, 利益: g - x.expenses,
+        月: `${year}年${x.m}月`, '売上（税込）': x.sales ?? '', '仕入れ（税込）': x.purchases, うち発注書: x.ordered, うち手入力: x.manual, 粗利: g, 粗利率: pct(g, s),
+        ...Object.fromEntries(usedCats.map(c => [c.name, x.byCat[c.id] ?? ''])), 経費合計: x.expenses, 利益: g - x.expenses, 利益率: pct(g - x.expenses, s),
       }
     }), headers, `売上・経費_${year}${store ? '_' + (stores.find(s => s.id === store)?.name ?? '') : ''}.csv`)
     toast('CSV を書き出しました')
@@ -93,7 +101,7 @@ export default function FinancePage() {
     <div>
       <div className="page-title">
         <h1>売上・経費</h1>
-        <p>月ごとの売上と経費を入れると、仕入れ（発注書の合計）と合わせて、粗利と利益を出します。金額はすべて税込です。</p>
+        <p>月ごとの売上・仕入れ・経費を入れると、粗利と利益を出します。仕入れは、発注書の合計に、手で入れた金額を足したものです。金額はすべて税込です。</p>
       </div>
 
       <div className="toolbar">
@@ -112,7 +120,7 @@ export default function FinancePage() {
 
       <div className="kpis">
         <div className="kpi"><span>売上（{year}年）</span><b>{yen(total.sales)}</b><small>{months.filter(x => x.sales != null).length}か月分を入力ずみ</small></div>
-        <div className="kpi"><span>仕入れ（発注書の合計）</span><b>{yen(total.purchases)}</b><small>取消を除く</small></div>
+        <div className="kpi"><span>仕入れ</span><b>{yen(total.purchases)}</b><small>売上の {pct(total.purchases, total.sales)}</small></div>
         <div className="kpi"><span>粗利（売上 − 仕入れ）</span><b>{yen(gross)}</b><small>粗利率 {pct(gross, total.sales)}</small></div>
         <div className="kpi"><span>経費</span><b>{yen(total.expenses)}</b><small>売上の {pct(total.expenses, total.sales)}</small></div>
         <div className={profit < 0 ? 'kpi bad' : 'kpi good'}><span>利益（粗利 − 経費）</span><b>{yen(profit)}</b><small>利益率 {pct(profit, total.sales)}</small></div>
@@ -125,10 +133,10 @@ export default function FinancePage() {
       </section>
 
       <section className="panel">
-        <div className="panel-head"><h2>月ごとの集計</h2><span className="muted small">月の「入力」で、売上と経費を入れます</span></div>
+        <div className="panel-head"><h2>月ごとの集計</h2><span className="muted small">月の「入力」で、売上・仕入れ・経費を入れます</span></div>
         <div className="tbl-wrap">
           <table className="list">
-            <thead><tr><th>月</th><th className="num">売上</th><th className="num">仕入れ</th><th className="num">粗利</th><th className="num">粗利率</th><th className="num">経費</th><th className="num">利益</th><th /></tr></thead>
+            <thead><tr><th>月</th><th className="num">売上</th><th className="num">仕入れ</th><th className="num">粗利</th><th className="num">粗利率</th><th className="num">経費</th><th className="num">利益</th><th className="num">利益率</th><th /></tr></thead>
             <tbody>
               {months.map(x => {
                 const s = x.sales ?? 0, g = s - x.purchases, p = g - x.expenses
@@ -141,19 +149,21 @@ export default function FinancePage() {
                     <td className="num sub">{pct(g, s)}</td>
                     <td className="num">{yen(x.expenses)}</td>
                     <td className={p < 0 ? 'num neg' : 'num'}><b>{yen(p)}</b></td>
+                    <td className={p < 0 ? 'num sub neg' : 'num sub'}>{pct(p, s)}</td>
                     <td className="actions"><button className="btn small" onClick={() => setEditing(editing === x.m ? null : x.m)}>{editing === x.m ? '閉じる' : '入力'}</button></td>
                   </tr>
                 )
               })}
             </tbody>
             <tfoot><tr><th>合計</th><th className="num">{yen(total.sales)}</th><th className="num">{yen(total.purchases)}</th><th className="num">{yen(gross)}</th>
-              <th className="num">{pct(gross, total.sales)}</th><th className="num">{yen(total.expenses)}</th><th className="num">{yen(profit)}</th><th /></tr></tfoot>
+              <th className="num">{pct(gross, total.sales)}</th><th className="num">{yen(total.expenses)}</th><th className="num">{yen(profit)}</th><th className="num">{pct(profit, total.sales)}</th><th /></tr></tfoot>
           </table>
         </div>
         {editing != null && (
           <MonthEditor key={`${year}-${editing}-${store}`} year={year} month={editing} storeId={store || (activeStores.length === 1 ? activeStores[0].id : '')}
-            stores={activeStores} cats={cats.filter(c => c.active)} sales={sales ?? []} expenses={expenses} purchases={months[editing - 1].purchases}
-            userId={profile.id} onSaved={async () => { await load(); toast(`${editing}月の売上・経費を保存しました`) }} onClose={() => setEditing(null)} />
+            stores={activeStores} cats={cats.filter(c => c.active)} sales={sales ?? []} expenses={expenses} purchases={purchases}
+            orderTotals={orderTotals(orders, `${year}-${String(editing).padStart(2, '0')}`)}
+            userId={profile.id} onSaved={async () => { await load(); toast(`${editing}月の売上・仕入れ・経費を保存しました`) }} onClose={() => setEditing(null)} />
         )}
       </section>
 
@@ -206,30 +216,35 @@ function short(v: number) {
 }
 
 /** 1か月分の売上と経費を入れる */
-function MonthEditor({ year, month, storeId, stores, cats, sales, expenses, purchases, userId, onSaved, onClose }: {
+function MonthEditor({ year, month, storeId, stores, cats, sales, expenses, purchases, orderTotals, userId, onSaved, onClose }: {
   year: number; month: number; storeId: string; stores: { id: string; name: string }[]; cats: Category[]
-  sales: Sale[]; expenses: Expense[]; purchases: number; userId: string; onSaved: () => Promise<void>; onClose: () => void
+  sales: Sale[]; expenses: Expense[]; purchases: Purchase[]; orderTotals: Record<string, number>; userId: string
+  onSaved: () => Promise<void>; onClose: () => void
 }) {
   const key = `${year}-${String(month).padStart(2, '0')}-01`
   const [sid, setSid] = useState(storeId)
   const cur = (id: string) => ({
     sale: sales.find(s => s.store_id === id && s.month === key),
+    buy: purchases.find(p => p.store_id === id && p.month === key),
     exp: Object.fromEntries(expenses.filter(e => e.store_id === id && e.month === key).map(e => [e.category_id, e.amount])),
   })
   const init = (id: string) => {
     const c = cur(id)
-    return { sale: c.sale ? String(c.sale.amount) : '', note: c.sale?.note ?? '', exp: Object.fromEntries(cats.map(k => [k.id, c.exp[k.id] != null ? String(c.exp[k.id]) : ''])) }
+    return { sale: c.sale ? String(c.sale.amount) : '', buy: c.buy ? String(c.buy.amount) : '', note: c.sale?.note ?? '', exp: Object.fromEntries(cats.map(k => [k.id, c.exp[k.id] != null ? String(c.exp[k.id]) : ''])) }
   }
   const [form, setForm] = useState(() => init(storeId))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
   const saleN = toNum(form.sale)
+  const buyN = toNum(form.buy)
+  const ordered = orderTotals[sid] ?? 0
+  const buyTotal = ordered + (buyN ?? 0)
   const expN = cats.reduce((a, c) => a + (toNum(form.exp[c.id] ?? '') ?? 0), 0)
 
   async function save() {
     if (!sid) { setError('店舗を選んでください'); return }
-    const bad = [form.sale, ...Object.values(form.exp)].some(v => { const n = toNum(v); return n != null && (!Number.isFinite(n) || n < 0) })
+    const bad = [form.sale, form.buy, ...Object.values(form.exp)].some(v => { const n = toNum(v); return n != null && (!Number.isFinite(n) || n < 0) })
     if (bad) { setError('金額は 0 以上の数字で入れてください'); return }
     setBusy(true); setError('')
     try {
@@ -238,6 +253,12 @@ function MonthEditor({ year, month, storeId, stores, cats, sales, expenses, purc
         const r = await supabase.from('monthly_sales').delete().eq('store_id', sid).eq('month', key); if (r.error) throw r.error
       } else {
         const r = await supabase.from('monthly_sales').upsert({ store_id: sid, month: key, amount: Math.round(saleN), note: form.note, updated_by: userId, updated_at: now }, { onConflict: 'store_id,month' })
+        if (r.error) throw r.error
+      }
+      if (buyN == null) {
+        const r = await supabase.from('monthly_purchases').delete().eq('store_id', sid).eq('month', key); if (r.error) throw r.error
+      } else {
+        const r = await supabase.from('monthly_purchases').upsert({ store_id: sid, month: key, amount: Math.round(buyN), updated_by: userId, updated_at: now }, { onConflict: 'store_id,month' })
         if (r.error) throw r.error
       }
       const put = cats.filter(c => toNum(form.exp[c.id] ?? '') != null)
@@ -253,7 +274,7 @@ function MonthEditor({ year, month, storeId, stores, cats, sales, expenses, purc
 
   return (
     <div className="edit-form month-editor">
-      <h3>{year}年{month}月の売上・経費</h3>
+      <h3>{year}年{month}月の売上・仕入れ・経費</h3>
       {stores.length > 1 && (
         <div className="field"><label htmlFor="fin-store">店舗</label>
           <select id="fin-store" value={sid} onChange={e => { setSid(e.target.value); setForm(init(e.target.value)) }}>
@@ -263,6 +284,9 @@ function MonthEditor({ year, month, storeId, stores, cats, sales, expenses, purc
       <div className="form-grid">
         <div className="field"><label htmlFor="fin-sale">売上（税込・円）</label>
           <input id="fin-sale" inputMode="numeric" placeholder="例 1,250,000" value={form.sale} onChange={e => setForm(f => ({ ...f, sale: e.target.value }))} /></div>
+        <div className="field"><label htmlFor="fin-buy">仕入れ（税込・円）</label>
+          <input id="fin-buy" inputMode="numeric" placeholder="例 800,000" value={form.buy} onChange={e => setForm(f => ({ ...f, buy: e.target.value }))} />
+          <small className="muted">発注書の分（{yen(ordered)}）は自動で足します。それ以外の仕入れを入れてください</small></div>
         <div className="field"><label htmlFor="fin-note">メモ</label>
           <input id="fin-note" placeholder="例 イベントあり" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} /></div>
       </div>
@@ -274,10 +298,9 @@ function MonthEditor({ year, month, storeId, stores, cats, sales, expenses, purc
         ))}
       </div>
       <div className="month-sum">
-        <span>売上 <b>{yen(saleN ?? 0)}</b></span><span>− 仕入れ <b>{yen(purchases)}</b></span><span>− 経費 <b>{yen(expN)}</b></span>
-        <span>＝ 利益 <b className={(saleN ?? 0) - purchases - expN < 0 ? 'neg' : ''}>{yen((saleN ?? 0) - purchases - expN)}</b></span>
+        <span>売上 <b>{yen(saleN ?? 0)}</b></span><span>− 仕入れ <b>{yen(buyTotal)}</b></span><span>− 経費 <b>{yen(expN)}</b></span>
+        <span>＝ 利益 <b className={(saleN ?? 0) - buyTotal - expN < 0 ? 'neg' : ''}>{yen((saleN ?? 0) - buyTotal - expN)}</b></span>
       </div>
-      {stores.length > 1 && !storeId && <p className="sub">仕入れは、上で選んだ店舗（すべての店舗）の合計です。</p>}
       {error && <p className="msg">{error}</p>}
       <div className="row">
         <button className="btn primary" disabled={busy} onClick={save}>{busy ? '保存中…' : '保存する'}</button>
@@ -285,6 +308,13 @@ function MonthEditor({ year, month, storeId, stores, cats, sales, expenses, purc
       </div>
     </div>
   )
+}
+
+/** 店舗ごとの、その月の発注書の合計 */
+function orderTotals(orders: { store_id: string; order_date: string; total: number }[], ym: string) {
+  const t: Record<string, number> = {}
+  for (const o of orders) if (o.order_date.slice(0, 7) === ym) t[o.store_id] = (t[o.store_id] ?? 0) + o.total
+  return t
 }
 
 /** 経費の項目を足す・使わなくする */
