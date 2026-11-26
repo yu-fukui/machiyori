@@ -314,6 +314,17 @@ td.warn { font-weight: 700; }
 .chart .bar.s2 rect:first-child { fill: var(--series-2); }
 .chart .bar .hit { fill: transparent; }
 .chart .bar:hover rect:first-child { opacity: .8; }
+.key.line { height: 3px; border-radius: 2px; width: 16px; }
+.key.line.dash { background: repeating-linear-gradient(90deg, var(--series-2) 0 5px, transparent 5px 8px); }
+.chart path.line { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.chart path.line.s1 { stroke: var(--series-1); }
+.chart path.line.s2 { stroke: var(--series-2); }
+.chart path.line.dash { stroke-dasharray: 6 4; }
+.chart .pt circle { stroke: var(--panel); stroke-width: 1.5; }
+.chart .pt circle.s1 { fill: var(--series-1); }
+.chart .pt circle.s2 { fill: var(--series-2); }
+.chart .pt .hit { fill: transparent; }
+.chart .pt:hover circle { r: 5; }
 td.neg, b.neg { color: var(--danger); }
 .month-editor { margin-top: 16px; }
 .month-sum { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 4px 0 12px; font-size: 14px; color: var(--muted); }

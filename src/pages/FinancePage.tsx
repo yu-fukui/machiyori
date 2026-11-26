@@ -133,6 +133,12 @@ export default function FinancePage() {
       </section>
 
       <section className="panel">
+        <div className="panel-head"><h2>月ごとの粗利率と利益率</h2>
+          <div className="legend small"><span><i className="key line s1" />粗利率</span><span><i className="key line s2 dash" />利益率</span></div></div>
+        <RateChart months={months} />
+      </section>
+
+      <section className="panel">
         <div className="panel-head"><h2>月ごとの集計</h2><span className="muted small">月の「入力」で、売上・仕入れ・経費を入れます</span></div>
         <div className="tbl-wrap">
           <table className="list">
@@ -201,6 +207,54 @@ function BarChart({ months }: { months: Month[] }) {
             <text className="tick" x={cx} y={H - 8} textAnchor="middle">{x.m}月</text>
           </g>
         })}
+      </svg>
+    </div>
+  )
+}
+/** 月ごとの粗利率と利益率の折れ線グラフ（売上を入れていない月は点を打たず、線を切る） */
+function RateChart({ months }: { months: Month[] }) {
+  const W = 760, H = 220, L = 64, R = 8, T = 14, B = 28
+  const pts = months.map(x => {
+    const s = x.sales ?? 0
+    if (s <= 0) return null
+    const g = s - x.purchases
+    return { m: x.m, gross: (g / s) * 100, profit: ((g - x.expenses) / s) * 100 }
+  })
+  const vals = pts.flatMap(p => (p ? [p.gross, p.profit] : []))
+  if (!vals.length) return <p className="muted small">売上を入れた月がまだありません。</p>
+  const max = Math.max(10, ...vals), min = Math.min(0, ...vals)
+  const step = niceStep((max - min) / 4)
+  const top = Math.ceil(max / step) * step, bottom = Math.floor(min / step) * step
+  const y = (v: number) => T + ((top - v) / (top - bottom || 1)) * (H - T - B)
+  const slot = (W - L - R) / 12
+  const cx = (m: number) => L + slot * (m - 1) + slot / 2
+  const ticks: number[] = []
+  for (let v = bottom; v <= top + 1e-6; v += step) ticks.push(v)
+  const r1 = (v: number) => `${Math.round(v * 10) / 10}%`
+  const path = (k: 'gross' | 'profit') => {
+    let d = '', prev = false
+    pts.forEach((p, i) => {
+      if (!p) { prev = false; return }
+      d += `${prev ? 'L' : 'M'}${cx(i + 1).toFixed(1)},${y(p[k]).toFixed(1)}`
+      prev = true
+    })
+    return d
+  }
+  return (
+    <div className="chart-wrap">
+      <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="月ごとの粗利率と利益率の折れ線グラフ。数字は下の表にあります">
+        {ticks.map(v => <g key={v}><line className={v === 0 ? 'axis' : 'grid'} x1={L} x2={W - R} y1={y(v)} y2={y(v)} />
+          <text className="tick" x={L - 8} y={y(v) + 4} textAnchor="end">{v}%</text></g>)}
+        {months.map(x => <text key={x.m} className="tick" x={cx(x.m)} y={H - 8} textAnchor="middle">{x.m}月</text>)}
+        <path className="line s1" d={path('gross')} />
+        <path className="line s2 dash" d={path('profit')} />
+        {pts.map(p => p && (
+          <g key={p.m} className="pt">
+            <circle className="s1" cx={cx(p.m)} cy={y(p.gross)} r={3.5} />
+            <circle className="s2" cx={cx(p.m)} cy={y(p.profit)} r={3.5} />
+            <rect className="hit" x={cx(p.m) - slot / 2} y={T} width={slot} height={H - T - B}><title>{`${p.m}月 粗利率 ${r1(p.gross)} ／ 利益率 ${r1(p.profit)}`}</title></rect>
+          </g>
+        ))}
       </svg>
     </div>
   )
